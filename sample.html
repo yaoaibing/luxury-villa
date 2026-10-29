@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>局部精修样板 · 主入口门廊 + 南立面一个开间</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#e9edf2;
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif; }
+  canvas { display:block; }
+  .pane { position:fixed; border-right:1px solid #c3cbd6; border-bottom:1px solid #c3cbd6; }
+  .tag { position:fixed; font-size:15px; font-weight:700; color:#182430;
+    background:rgba(255,255,255,.92); padding:4px 10px; border-radius:3px;
+    box-shadow:0 1px 4px rgba(0,0,0,.15); pointer-events:none; }
+  .tag span { display:block; font-weight:400; font-size:12px; color:#5f6b7a; }
+  .hd { position:fixed; left:0; right:0; top:0; height:52px; background:#182430; color:#fff;
+    display:flex; align-items:center; padding:0 20px; font-size:17px; font-weight:700; z-index:9; }
+  .hd em { font-style:normal; font-weight:400; font-size:13px; color:#9fb0c4; margin-left:14px; }
+  .lg { position:fixed; right:16px; bottom:12px; font-size:12px; color:#5f6b7a;
+    background:rgba(255,255,255,.9); padding:6px 10px; border-radius:3px; z-index:9; }
+  .lg b { color:#1f7a5a; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div class="hd">局部精修样板<em>主入口门廊 ＋ 南立面一个开间（u −8.5 ~ 3.0）　左：体量版　右：精修版　上：标准视距　下：近景</em></div>
+<div class="lg">
+  <b>精修版新增</b>：洞口四壁内衬 30mm · 窗框内退 100mm · 竖挺分格 · 窗台板＋滴水 · 板缝 30mm 留空＋深色底板后退 8mm
+  · 雨棚吊顶内凹 60mm 阴影缝 · 檐口滴水 · 柱脚/柱头过渡 · 台阶踢面与防滑条 · 全部构件倒角
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { M, box, slab, makeDir, wallPanel, facade, signTexture, setupLights } from './src/core.js';
+import {
+  windowUnit, doorUnit, canopy, steps, signage,
+} from './src/detail.js';
+
+/* ---------------- 样板参数（与整栋同源，改这里即改样板） ---------------- */
+const SP = {
+  uSpan: [-8.5, 3.0],          // 样板横向范围（世界 x）
+  y1: 3.90,                    // 一层层高
+  wall: 0.30,
+  z: 6.00,                     // 南立面外皮
+  win:  { u: [-7.80, -2.60], y: [0.30, 3.40] },
+  door: { u: [-1.10, 1.10],  y: [0.00, 2.70] },
+  splits: [-8.5, -6.0, -3.0, 0.0, 3.0],
+  porch: { halfW: 2.60, out: 2.60, clear: 3.60, thick: 0.30 },
+};
+const D = makeDir('south', SP.z);
+
+/* =========================================================
+   体量版：只保证轮廓与洞口，不做厚度/接缝/倒角
+========================================================= */
+function buildMassing(scene) {
+  const r = new THREE.Group(); scene.add(r);
+  // 墙板：一整块，不开缝、不倒角
+  const w = wallPanel({
+    uSpan: SP.uSpan, ySpan: [0, SP.y1], holes: [SP.win, SP.door],
+    mat: M.coat, thick: SP.wall, dir: D, root: r, name: '体量墙板', joint: 0.001,
+  });
+  // 玻璃：一块平板，直接贴在洞口外皮
+  [[SP.win], [SP.door]].forEach(([h]) => {
+    const [a, b] = h.u, [c, d] = h.y;
+    const g = new THREE.Mesh(new THREE.BoxGeometry(b - a, d - c, 0.02), M.dark);
+    g.position.set((a + b) / 2, (c + d) / 2, SP.z - 0.06);
+    r.add(g);
+  });
+  // 雨棚：一块板 + 两根方柱，无吊顶/无滴水/无柱脚
+  const p = SP.porch;
+  box(p.halfW * 2, p.thick, p.out, M.metalLite, 0, p.clear + p.thick / 2, SP.z + p.out / 2, r);
+  [-p.halfW + 0.15, p.halfW - 0.15].forEach((x) => {
+    box(0.16, p.clear, 0.16, M.metal, x, p.clear / 2, SP.z + p.out - 0.18, r);
+  });
+  // 台阶：三级，只有踏面，无踢面/无防滑条
+  for (let i = 0; i < 3; i++) {
+    box(3.40, 0.17, 0.34, M.conc, 0, 0.17 * (3 - i) - 0.085, SP.z + 1.20 + 0.34 * i + 0.17, r);
+  }
+  box(4.60, 0.51, 1.20, M.conc, 0, 0.255, SP.z + 0.60, r);
+  // 地面
+  const gnd = box(40, 0.3, 40, M.conc, -2, -0.15, SP.z + 8, r); gnd.castShadow = false;
+  return r;
+}
+
+/* =========================================================
+   精修版：洞口/厚度/接缝/倒角全部实体化
+========================================================= */
+function buildDetail(scene) {
+  const r = new THREE.Group(); scene.add(r);
+  // 内胆（退到墙内皮）
+  box(SP.uSpan[1] - SP.uSpan[0], SP.y1, 1.2, M.dark,
+    (SP.uSpan[0] + SP.uSpan[1]) / 2, SP.y1 / 2, SP.z - SP.wall - 0.6, r);
+
+  facade({
+    uSpan: SP.uSpan, ySpan: [0, SP.y1], holes: [SP.win, SP.door],
+    mat: M.coat, thick: SP.wall, dir: D, root: r, name: '精修墙面',
+    splits: SP.splits,
+  });
+  windowUnit({
+    hole: SP.win, dir: D, root: r, name: '落地窗', thick: SP.wall,
+    mullions: [-1.6, 1.6], sillOut: 0.12,
+  });
+  doorUnit({
+    hole: SP.door, dir: D, root: r, name: '主入口门', thick: SP.wall, leaves: 2,
+  });
+  canopy({
+    dir: D, root: r, name: '入口雨棚', halfW: SP.porch.halfW, out: SP.porch.out,
+    clear: SP.porch.clear, thick: SP.porch.thick, columns: 2,
+  });
+  steps({
+    dir: D, root: r, name: '入口台阶', width: 3.40,
+    run: 0.34, rise: 0.17, count: 3, platform: 1.20, landW: 4.60,
+  });
+  signage({
+    dir: D, root: r, u: 2.30, y: 2.20, name: '门牌',
+    w: 0.66, h: 0.33, tex: signTexture(['VILLA', 'No. 168']), out: 0.03,
+  });
+  const gnd = box(40, 0.3, 40, M.conc, -2, -0.15, SP.z + 8, r); gnd.castShadow = false;
+  return r;
+}
+
+/* ---------------- 场景 ---------------- */
+const mk = () => {
+  const s = new THREE.Scene();
+  s.background = new THREE.Color(0xe9edf2);
+  setupLights(s, { background: false, shadowSpan: 14, sunI: 2.3, hemiI: 0.55, envI: 0.85 });
+  return s;
+};
+const sMass = mk(), sDet = mk();
+buildMassing(sMass);
+buildDetail(sDet);
+
+/* ---------------- 渲染器（单 canvas 四分屏） ---------------- */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.04;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.autoUpdate = false;
+renderer.setScissorTest(true);
+document.body.appendChild(renderer.domElement);
+
+const TOP = 52;
+const cams = {
+  std: { pos: [-6.4, 3.0, 14.6], look: [-3.0, 1.9, 6.0], fov: 34 },
+  near: { pos: [-7.9, 1.95, 9.6], look: [-6.6, 1.30, 6.05], fov: 38 },
+};
+function makeCam(kind, aspect) {
+  const c = cams[kind];
+  const cam = new THREE.PerspectiveCamera(c.fov, aspect, 0.1, 200);
+  cam.position.set(...c.pos);
+  cam.lookAt(...c.look);
+  return cam;
+}
+
+const panes = [
+  { key: 'm-std',  scene: sMass, kind: 'std',  label: '体量版',   desc: '标准视距 7m' },
+  { key: 'd-std',  scene: sDet,  kind: 'std',  label: '精修版',   desc: '标准视距 7m' },
+  { key: 'm-near', scene: sMass, kind: 'near', label: '体量版',   desc: '近景 · 窗台与雨棚端部' },
+  { key: 'd-near', scene: sDet,  kind: 'near', label: '精修版',   desc: '近景 · 窗台与雨棚端部' },
+];
+
+function layout() {
+  const H = innerHeight - TOP;
+  const w = innerWidth / 2, h = H / 2;
+  panes.forEach((p, i) => {
+    const px = (i % 2) * w, py = TOP + Math.floor(i / 2) * h;
+    p.cam = makeCam(p.kind, w / h);
+    p.rect = { px, py, w, h };
+  });
+  return { w, h };
+}
+
+let rects = layout();
+addEventListener('resize', () => { rects = layout(); draw(); });
+
+function draw() {
+  const { W, H } = { W: innerWidth, H: innerHeight - TOP };
+  renderer.setViewport(0, 0, innerWidth, innerHeight);
+  renderer.setScissor(0, 0, innerWidth, innerHeight);
+  renderer.clear();
+  panes.forEach((p) => {
+    renderer.setViewport(p.rect.px, innerHeight - p.rect.py - p.rect.h, p.rect.w, p.rect.h);
+    renderer.setScissor(p.rect.px, innerHeight - p.rect.py - p.rect.h, p.rect.w, p.rect.h);
+    renderer.render(p.scene, p.cam);
+  });
+  renderer.shadowMap.needsUpdate = true;
+  panes.forEach((p) => {
+    renderer.setViewport(p.rect.px, innerHeight - p.rect.py - p.rect.h, p.rect.w, p.rect.h);
+    renderer.setScissor(p.rect.px, innerHeight - p.rect.py - p.rect.h, p.rect.w, p.rect.h);
+    renderer.render(p.scene, p.cam);
+  });
+}
+
+/* 标签 */
+panes.forEach((p) => {
+  const d = document.createElement('div');
+  d.className = 'tag';
+  d.innerHTML = `${p.label}<span>${p.desc}</span>`;
+  d.style.left = (p.rect.px + 14) + 'px';
+  d.style.top = (p.rect.py + 12) + 'px';
+  document.body.appendChild(d);
+  p.el = d;
+});
+addEventListener('resize', () => {
+  panes.forEach((p) => {
+    p.el.style.left = (p.rect.px + 14) + 'px';
+    p.el.style.top = (p.rect.py + 12) + 'px';
+  });
+});
+
+draw();
+window.__ready = true;
+</script>
+</body>
+</html>
