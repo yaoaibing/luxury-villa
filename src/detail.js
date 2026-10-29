@@ -183,8 +183,9 @@ export function shutterDoor({
 
   reveal({ w, h, thick, mat: revealMat, parent: G, side: 'v' });
 
-  // 门楣罩（卷帘箱，突出墙面）
-  const hood = slab(w + 0.30, 0.40, 0.46, M.metal, 0, h + 0.20, -0.10, G, 0.02);
+  // 门楣罩（卷帘箱，突出墙面）：G 原点在洞口中心，用 h/2 定高；
+  // 局部 -z 为室外，罩中心推到 -(thick*0.4)，使罩体大部分在墙外、仅后端埋入墙体
+  const hood = slab(w + 0.30, 0.34, 0.40, M.metal, 0, h / 2 + 0.17, -thick * 0.4, G, 0.02);
   hood.name = '卷帘门楣罩';
 
   // 叶片（真几何，逐片）
@@ -455,15 +456,24 @@ export function signage({ dir, root, u, y, name, w = 0.70, h = 0.35, tex, out = 
 /* ============================================================
    11. 竖向木格栅（带上下封边 / 边立柱 / 背部横梁）
 ============================================================ */
-export function screen({ uSpan, ySpan, bar = 0.10, pitch = 0.25, depth = 0.26, out = 0.16, root, name }) {
+export function screen({ uSpan, ySpan, bar = 0.10, pitch = 0.25, depth = 0.12, out = 0.16, root, name }) {
   const G = new THREE.Group();
   const w = uSpan[1] - uSpan[0], h = ySpan[1] - ySpan[0];
   const cx = (uSpan[0] + uSpan[1]) / 2, cy = (ySpan[0] + ySpan[1]) / 2;
 
-  // 竖条（批量实例）
+  // 下横档（木质）：占 ySpan 下沿起 220mm，与竖条上下相接、互不重叠
+  // （竖条若插入横档内部，两者的前表面会在交叠区互相争深度，端部出现梳齿状花边）
+  const railH = 0.22;
+  box(w + 0.02, railH, depth - 0.010, M.wood, cx, ySpan[0] + railH / 2, out, G).name = '格栅下横档';
+
+  // 竖条（批量实例）：下端正好落在下横档顶面，上端插入金属上封边内
   const list = [];
-  for (let u = uSpan[0]; u <= uSpan[1] + 1e-6; u += pitch) list.push({ x: u, y: cy, z: out });
-  instanced(new THREE.BoxGeometry(bar, h, depth), M.wood, list, G, '木格栅竖条');
+  const sBot = ySpan[0] + railH;            // 竖条下端
+  const sTop = ySpan[1] + 0.10;             // 竖条上端（埋入上封边）
+  for (let u = uSpan[0]; u <= uSpan[1] + 1e-6; u += pitch) {
+    list.push({ x: u, y: (sBot + sTop) / 2, z: out });
+  }
+  instanced(new THREE.BoxGeometry(bar, sTop - sBot, depth - 0.010), M.wood, list, G, '木格栅竖条');
 
   // 背部横梁（让格栅是结构，不是贴片）
   [-h / 2 + 0.25, 0, h / 2 - 0.25].forEach((dy, i) => {
@@ -471,7 +481,7 @@ export function screen({ uSpan, ySpan, bar = 0.10, pitch = 0.25, depth = 0.26, o
   });
   // 上下封边（金属）
   slab(w + 0.20, 0.10, depth + 0.06, M.metal, cx, ySpan[1] + 0.05, out, G, 0.012).name = '格栅上封边';
-  slab(w + 0.20, 0.10, depth + 0.06, M.metal, cx, ySpan[0] - 0.05, out, G, 0.012).name = '格栅下封边';
+  slab(w + 0.20, 0.08, depth + 0.06, M.metal, cx, ySpan[0] - 0.04, out, G, 0.012).name = '格栅下封边';
   // 两侧立柱
   [-1, 1].forEach((s) => {
     box(0.11, h + 0.20, depth + 0.06, M.metal, cx + s * (w / 2 + 0.055), cy, out, G).name = '格栅边立柱';
@@ -480,8 +490,8 @@ export function screen({ uSpan, ySpan, bar = 0.10, pitch = 0.25, depth = 0.26, o
   const n = list.length;
   info(G, name, {
     size: `${w.toFixed(2)} × ${h.toFixed(2)} m`,
-    mat: '硬木竖向格栅（断面 100×260）+ 铝合金封边',
-    note: `${n} 根竖条，中心距 ${(pitch * 1000).toFixed(0)}mm，背后 3 道横梁`,
+    mat: '硬木竖向格栅（断面 100×120）+ 铝合金封边',
+    note: `${n} 根竖条，中心距 ${(pitch * 1000).toFixed(0)}mm，上下木横档 + 背后 3 道横梁`,
     simple: '金属连接件与防腐处理未建模',
   });
   return G;
