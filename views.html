@@ -49,8 +49,20 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xeef1f5);
 
-/* ---------------- PBR 光照 + 程序化天空环境 ---------------- */
-setupLights(scene, { background: false, shadowSpan: 26, sunI: 2.4, hemiI: 0.5, envI: 0.8 });
+/* ---------------- PBR 光照 + 程序化天空环境 ----------------
+   立面核对时，太阳必须照在所看的那一面：各视图给各自的方位角，
+   否则背光面的墙与地面全落在阴影里，看不出材质与构造。
+------------------------------------------------------------------ */
+const SUN_AZ = {
+  south: 168, north: 348, east: 78, west: 258, roof: 128, persp: 128,
+}[view] ?? 128;
+// 俯视时屋面直接正对太阳，强度要单独压低，否则一片死白
+const isRoof = view === 'roof';
+setupLights(scene, {
+  background: false, shadowSpan: 22, shadowMap: 4096,
+  sunI: isRoof ? 2.05 : 3.0, hemiI: isRoof ? 0.30 : 0.44, envI: isRoof ? 0.34 : 0.48,
+  sunAz: SUN_AZ, sunEl: isRoof ? 64 : 52,
+});
 
 /* ---------------- 模型 ---------------- */
 const { root: villa } = buildVilla(scene);
@@ -69,16 +81,19 @@ const need = {
 const aspect = innerWidth / innerHeight;
 let camera;
 if (view === 'persp') {
-  camera = new THREE.PerspectiveCamera(38, aspect, 0.5, 300);
-  camera.position.set(-27, 16, 30);
-  camera.lookAt(-2.0, 3.8, 0.5);
+  camera = new THREE.PerspectiveCamera(36, aspect, 0.5, 300);
+  camera.position.set(-21.5, 13.2, 24.5);
+  camera.lookAt(-2.6, 3.4, 0.2);
 } else {
-  const pad = 1.16;
+  const zm = parseFloat(q.get('zoom') || '1');   // 局部精修核对用：zoom<1 放大
+  const pad = 1.24 * zm;
   const fw = view === 'roof' ? need.roof.w * pad : need[view].w * pad;
   const fh = view === 'roof' ? need.roof.d * pad : need[view].h * pad;
   let s = fh;
   if (fw / fh > aspect) s = fw / aspect;
-  camera = new THREE.OrthographicCamera(-s * aspect / 2, s * aspect / 2, s / 2, -s / 2, -80, 260);
+  // near 必须为正：负 near 会让相机把建筑背后的构件（对侧遮阳拉杆等）也画出来，
+  // 表现为轮廓外悬空的斜杆。相机距中心 70，取 near 1 / far 200 足够。
+  camera = new THREE.OrthographicCamera(-s * aspect / 2, s * aspect / 2, s / 2, -s / 2, 1, 200);
   const cx = (BB.x0 + BB.x1) / 2, cz = (BB.z0 + BB.z1) / 2;
   const cy = view === 'roof' ? 0 : BB.y1 / 2;
   const dist = 70;
@@ -90,6 +105,12 @@ if (view === 'persp') {
   camera.position.set(...set);
   camera.up.set(0, view === 'roof' ? 0 : 1, view === 'roof' ? -1 : 0);
   camera.lookAt(cx, cy, cz);
+  // 顶部标题区占约 88px：把正交视口整体下移，避免建筑顶部被标题压住
+  const hPx = innerHeight, shiftPx = 44;
+  const frac = (shiftPx * 2) / hPx;          // 世界单位换算：视口高 s 对应 hPx 像素
+  camera.top += (s * frac) / 2;
+  camera.bottom += (s * frac) / 2;
+  camera.updateProjectionMatrix();
 }
 
 const names = {
