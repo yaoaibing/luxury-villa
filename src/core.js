@@ -134,6 +134,37 @@ export function pvTexture() {
   return t;
 }
 
+/* ---------------- BIPV 透光组件贴图（电池片间留缝透光） ---------------- */
+export function pvTranslucentTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  // 透光底色：半透浅蓝（电池片之间露出的部分）
+  g.fillStyle = 'rgba(196,214,232,0.55)';
+  g.fillRect(0, 0, 256, 256);
+  // 电池片：密排，片间预留 4mm 透光缝（画成约 3px）
+  const n = 8, cell = 256 / n;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      g.fillStyle = (i + j) % 2 ? '#1a2440' : '#151e36';
+      g.fillRect(i * cell + 2, j * cell + 2, cell - 4, cell - 4);
+      // 细栅
+      g.strokeStyle = 'rgba(170,192,230,0.22)';
+      g.lineWidth = 1;
+      for (let k = 1; k < 3; k++) {
+        const y = j * cell + 2 + (cell - 4) * k / 3;
+        g.beginPath(); g.moveTo(i * cell + 2, y); g.lineTo(i * cell + 2 + cell - 4, y); g.stroke();
+      }
+    }
+  }
+  // 铝合金压条边框
+  g.strokeStyle = '#8d949e'; g.lineWidth = 8;
+  g.strokeRect(4, 4, 248, 248);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 /* ---------------- 门牌 / 标识贴图 ---------------- */
 export function signTexture(lines = ['VILLA', 'No. 168']) {
   const c = document.createElement('canvas');
