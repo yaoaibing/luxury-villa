@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>别墅立面核验</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#eef1f5;
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif; }
+  canvas { display:block; }
+  .hd  { position:fixed; left:18px; top:15px; font-size:20px; font-weight:700; color:#182430; }
+  .sub { position:fixed; left:18px; top:43px; font-size:13px; color:#5f6b7a; }
+  .mk { position:fixed; pointer-events:none; }
+  .num { width:23px; height:23px; border-radius:50%; background:#1f7a5a; color:#fff;
+    font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 2px 5px rgba(0,0,0,.28); }
+  .num.q { background:#c8862a; }
+  .txt { position:absolute; left:28px; top:-3px; background:rgba(255,255,255,.96);
+    border:1px solid #1f7a5a; border-left-width:3px; color:#1d2530; font-size:13px;
+    line-height:1.4; padding:5px 9px; max-width:260px; white-space:pre-line; }
+  .txt.q { border-color:#c8862a; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div class="hd" id="hd"></div><div class="sub" id="sub"></div>
+<script type="module">
+import * as THREE from 'three';
+import { buildVilla, P } from './src/model.js';
+import { setupLights } from './src/core.js';
+
+const q = new URLSearchParams(location.search);
+const view = q.get('view') || 'south';
+const mark = q.get('mark') !== '0';
+
+/* ---------------- 渲染器 ---------------- */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.02;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.autoUpdate = false;   // 静态场景：只烘一次阴影
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xeef1f5);
+
+/* ---------------- PBR 光照 + 程序化天空环境 ---------------- */
+setupLights(scene, { background: false, shadowSpan: 26, sunI: 2.4, hemiI: 0.5, envI: 0.8 });
+
+/* ---------------- 模型 ---------------- */
+const { root: villa } = buildVilla(scene);
+
+/* ---------------- 相机：正交五视图 ---------------- */
+const m = P.main, gr = P.garage;
+const BB = { x0: gr.x0, x1: m.x1, z0: m.z0, z1: m.z1 + P.cant.south, y1: P.main.para };
+const need = {
+  south: { w: BB.x1 - BB.x0, h: BB.y1 },
+  north: { w: BB.x1 - BB.x0, h: BB.y1 },
+  east:  { w: BB.z1 - BB.z0, h: BB.y1 },
+  west:  { w: BB.z1 - BB.z0, h: BB.y1 },
+  roof:  { w: BB.x1 - BB.x0, d: BB.z1 - BB.z0 },
+};
+
+const aspect = innerWidth / innerHeight;
+let camera;
+if (view === 'persp') {
+  camera = new THREE.PerspectiveCamera(38, aspect, 0.5, 300);
+  camera.position.set(-27, 16, 30);
+  camera.lookAt(-2.0, 3.8, 0.5);
+} else {
+  const pad = 1.16;
+  const fw = view === 'roof' ? need.roof.w * pad : need[view].w * pad;
+  const fh = view === 'roof' ? need.roof.d * pad : need[view].h * pad;
+  let s = fh;
+  if (fw / fh > aspect) s = fw / aspect;
+  camera = new THREE.OrthographicCamera(-s * aspect / 2, s * aspect / 2, s / 2, -s / 2, -80, 260);
+  const cx = (BB.x0 + BB.x1) / 2, cz = (BB.z0 + BB.z1) / 2;
+  const cy = view === 'roof' ? 0 : BB.y1 / 2;
+  const dist = 70;
+  const set = {
+    south: [cx, cy, dist], north: [cx, cy, -dist],
+    east:  [dist, cy, cz], west:  [-dist, cy, cz],
+    roof:  [cx, dist, cz],
+  }[view];
+  camera.position.set(...set);
+  camera.up.set(0, view === 'roof' ? 0 : 1, view === 'roof' ? -1 : 0);
+  camera.lookAt(cx, cy, cz);
+}
+
+const names = {
+  south: '南立面（主景观面 / 主入口）', north: '北立面（背面 / 服务入口）',
+  east: '东立面', west: '西立面（车库面）', roof: '屋顶平面', persp: '体量透视',
+};
+document.getElementById('hd').textContent = names[view];
+document.getElementById('sub').textContent =
+  `正交投影 · 主楼 ${(m.x1 - m.x0).toFixed(1)}m ＋西车库 ${(m.x0 - gr.x0).toFixed(1)}m ＝总宽 ${(m.x1 - gr.x0).toFixed(1)}m · `
+  + `一层 ${m.f1}m / 二层楼面 ${(m.f1 + m.slab).toFixed(2)}m / 女儿墙顶 ${m.para}m`;
+
+/* ---------------- 逐面核对标注 ----------------
+   绿色 = 本轮已处置；橙色 = 仍需你拍板
+------------------------------------------------- */
+const ZS = m.z1 + P.cant.south;
+const MARKS = {
+  south: [
+    [[0, P.porch.clear + 0.2, 8.2], '入口雨棚净高已由 3.20 提到 3.60m，挑出 2.60m；下设 3 级台阶＋1.20m 平台。', 0],
+    [[-5.0, 5.7, ZS + 0.2], '二层通长玻璃 16.8m 已分 5 段：4 根竖挺，每段 3.36m。', 0],
+    [[-4.8, 6.4, ZS + 0.35], '木格栅已由 4.8m 扩至 7.2m（u −8.40~−1.20），带上下金属封边与 3 道背横梁。', 0],
+    [[5.4, 0.30, m.z1 + 0.1], '落地窗台 0.30m；四周已设 0.70m 宽散水＋通长排水沟，室内外高差已处理。', 0],
+    [[2.30, 2.20, m.z1 + 0.1], '入口门牌（唯一贴图之一，拉丝不锈钢阴刻）。', 1],
+    [[-6.5, 1.8, m.z1 + 0.1], '石材为 3m 一开间真板缝（缝宽 30mm，缝内露出后退 8mm 的深色底板）。', 1],
+  ],
+  east: [
+    [[m.x1 + 0.2, 3.6, 0], '层间墙已由 1.90m 减至 1.60m（一层窗顶 2.80 → 二层窗台 4.40）。', 0],
+    [[m.x1 + 1.0, 6.62, 3.4], '东向遮阳挑檐已设：两段各 2.90m 长、挑出 0.90m，带封边与滴水；中部通高窗不遮挡。', 0],
+    [[m.x0 + 0.12, 4.5, 0.2], '雨水立管已移至西南凹角（主楼西墙×车库南墙），不再挂在阳角。', 0],
+    [[m.x1 + 0.2, 4.9, -0.0], '中部通高窗 1.40×2.60m，与两侧窗形成竖向节奏。', 1],
+  ],
+  north: [
+    [[-3.5, 1.10, m.z0 - 0.2], '服务门已由 1.0m 加宽至 1.20m，门高 2.20m。', 0],
+    [[5.4, 1.0, m.z0 - 0.9], '空调外机已加 3.20m 宽防雨百叶罩（12 片，倾角 32°）。', 0],
+    [[-4.5, 2.2, m.z0 - 0.2], '高窗窗台已由 1.6m 下调至 1.50m。', 0],
+    [[-11.4, 1.8, m.z0 - 0.2], '车库段另设 1.50m 通风百叶。', 1],
+  ],
+  west: [
+    [[gr.x0 - 0.2, 1.4, -2.5], '卷帘门 5.00×2.80m（双车位），带门楣罩、导轨与 14 片叶片。', 0],
+    [[gr.x0 - 0.2, 3.85, 0.1], '车库净高 3.60 与二层楼板底 3.90 的错台已补铝合金线脚收口。', 0],
+    [[gr.x0 - 0.2, 4.5, -3.4], '车库顶做露台：3.90m 面层＋1.10m 玻璃栏板，二层有门直达。', 0],
+    [[gr.x0 - 0.2, 6.6, -3.4], '二层通高窗 4.40~7.00m，位于露台上方主楼西墙。', 1],
+    [[gr.x0 - 0.2, 1.9, -5.6], '门牌位置预留（车库西墙门侧）。', 1],
+  ],
+  roof: [
+    [[0, m.para + 0.4, 1.6], '光伏已由 12 块扩至 3×8＝24 块，占地约 ' + (3 * 1.65 + 7 * 0.14).toFixed(1) + '×' + (3 * 1.0 + 2 * 0.14).toFixed(1) + 'm，约 ' + ((3 * 1.65 + 7 * 0.14) * (3 * 1.0 + 2 * 0.14) / 216 * 100).toFixed(0) + '% 屋面。', 0],
+    [[-4.6, m.para + 0.3, -4.2], '设备平台已设：5.40×2.10m 混凝土基础＋2 台热泵机组。', 0],
+    [[-3.6, m.para + 0.3, 1.0], '已设 3 处采光天窗（2.60×1.30m），补一层进深 12m 的中部采光。', 0],
+    [[0, m.para + 0.2, -5.4], '光伏区与设备区之间留 1.10m 检修走道，实现分区。', 0],
+    [[6.5, m.para + 0.3, 4.0], '南侧尚有约 55% 屋面空置，可继续加光伏或做绿化屋面。', 1],
+  ],
+};
+
+if (mark && MARKS[view]) {
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+  MARKS[view].forEach(([p, text, kind], i) => {
+    const v = new THREE.Vector3(p[0], p[1], p[2]).project(camera);
+    const x = (v.x * 0.5 + 0.5) * innerWidth;
+    const y = (-v.y * 0.5 + 0.5) * innerHeight;
+    const d = document.createElement('div');
+    d.className = 'mk';
+    d.style.left = x + 'px'; d.style.top = y + 'px';
+    d.innerHTML = `<div class="num${kind ? ' q' : ''}">${i + 1}</div>`
+      + `<div class="txt${kind ? ' q' : ''}">${text}</div>`;
+    document.body.appendChild(d);
+  });
+}
+
+renderer.render(scene, camera);
+renderer.shadowMap.needsUpdate = true;
+renderer.render(scene, camera);
+window.__ready = true;
+</script>
+</body>
+</html>
