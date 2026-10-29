@@ -53180,7 +53180,7 @@ const M = {
   coatShade: std(0xdfdbd1, { r: 0.82 }),    // 涂料阴影面
 
   metal: std(0x373c44, { r: 0.34, m: 0.72 }),      // 深灰铝板（框/压顶/包边）
-  metalLite: std(0xa4abb5, { r: 0.32, m: 0.62 }),  // 浅灰铝（雨棚底/格栅封边）
+  metalLite: std(0x99a0aa, { r: 0.44, m: 0.42, extra: { envMapIntensity: 0.55 } }),  // 浅灰铝（雨棚底/格栅封边）
   steel: std(0x6e757f, { r: 0.40, m: 0.55 }),      // 不锈钢（栏杆/立柱）
 
   wood: std(0x8d6c46, { r: 0.68 }),         // 木饰面（格栅）
@@ -53196,9 +53196,16 @@ const M = {
   }),
 
   dark: std(0x353b44, { r: 0.60 }),         // 内胆（洞口里看到的室内，不用纯黑）
-  conc: std(0xc3bfb7, { r: 0.88 }),         // 混凝土（地坪/台阶/女儿墙内侧）
-  concDark: std(0xa8a49c, { r: 0.90 }),     // 台阶踢面 / 散水
+  conc: std(0xa8a49a, { r: 0.88 }),         // 混凝土（地坪/台阶/女儿墙内侧）
+  concDark: std(0x9a968c, { r: 0.90 }),     // 台阶踢面 / 散水 / 铺装
   gravel: std(0x8e8a81, { r: 0.94 }),       // 散水卵石
+  // 场地铺装：暖灰石材。envMapIntensity 压低到 0.16，
+  // 否则粗糙度再高的地坪也会反射蓝天，整片地面看起来像积水的深色板
+  pave: new THREE.MeshLambertMaterial({ color: 0xd8d2c4 }),
+  // 入口步道：比铺装再亮一档，形成通行引导
+  paveWalk: new THREE.MeshLambertMaterial({ color: 0xded8ca }),
+  // 车库车道：中性深灰沥青（刻意偏中性，不用偏蓝的 M.dark）
+  asphalt: new THREE.MeshLambertMaterial({ color: 0x8a877f }),
 };
 
 /* ---------------- 程序化天空（PBR 环境光） ----------------
@@ -53493,13 +53500,13 @@ function setupLights(scene, opts = {}) {
   const cam = sun.shadow.camera;
   cam.left = -s; cam.right = s; cam.top = s; cam.bottom = -s;
   cam.near = 1; cam.far = 120;
-  sun.shadow.bias = -0.0006;
-  sun.shadow.normalBias = 0.035;
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.018;
   sun.target.position.set(0, 3, 0);
   scene.add(sun); scene.add(sun.target);
 
   // 天空补光（冷）+ 地面反弹（暖）
-  const hemi = new THREE.HemisphereLight(0xbcd8f0, 0x6c6a5e, opts.hemiI ?? 0.55);
+  const hemi = new THREE.HemisphereLight(0xc9d4e2, 0x8a8478, opts.hemiI ?? 0.55);
   scene.add(hemi);
 
   // 环境反射
@@ -53698,8 +53705,9 @@ function shutterDoor({
 
   reveal({ w, h, thick, mat: revealMat, parent: G, side: 'v' });
 
-  // 门楣罩（卷帘箱，突出墙面）
-  const hood = slab(w + 0.30, 0.40, 0.46, M.metal, 0, h + 0.20, -0.10, G, 0.02);
+  // 门楣罩（卷帘箱，突出墙面）：G 原点在洞口中心，用 h/2 定高；
+  // 局部 -z 为室外，罩中心推到 -(thick*0.4)，使罩体大部分在墙外、仅后端埋入墙体
+  const hood = slab(w + 0.30, 0.34, 0.40, M.metal, 0, h / 2 + 0.17, -thick * 0.4, G, 0.02);
   hood.name = '卷帘门楣罩';
 
   // 叶片（真几何，逐片）
@@ -53970,15 +53978,24 @@ function signage({ dir, root, u, y, name, w = 0.70, h = 0.35, tex, out = 0.02 })
 /* ============================================================
    11. 竖向木格栅（带上下封边 / 边立柱 / 背部横梁）
 ============================================================ */
-function screen({ uSpan, ySpan, bar = 0.10, pitch = 0.25, depth = 0.26, out = 0.16, root, name }) {
+function screen({ uSpan, ySpan, bar = 0.10, pitch = 0.25, depth = 0.12, out = 0.16, root, name }) {
   const G = new THREE.Group();
   const w = uSpan[1] - uSpan[0], h = ySpan[1] - ySpan[0];
   const cx = (uSpan[0] + uSpan[1]) / 2, cy = (ySpan[0] + ySpan[1]) / 2;
 
-  // 竖条（批量实例）
+  // 下横档（木质）：占 ySpan 下沿起 220mm，与竖条上下相接、互不重叠
+  // （竖条若插入横档内部，两者的前表面会在交叠区互相争深度，端部出现梳齿状花边）
+  const railH = 0.22;
+  box(w + 0.02, railH, depth - 0.010, M.wood, cx, ySpan[0] + railH / 2, out, G).name = '格栅下横档';
+
+  // 竖条（批量实例）：下端正好落在下横档顶面，上端插入金属上封边内
   const list = [];
-  for (let u = uSpan[0]; u <= uSpan[1] + 1e-6; u += pitch) list.push({ x: u, y: cy, z: out });
-  instanced(new THREE.BoxGeometry(bar, h, depth), M.wood, list, G, '木格栅竖条');
+  const sBot = ySpan[0] + railH;            // 竖条下端
+  const sTop = ySpan[1] + 0.10;             // 竖条上端（埋入上封边）
+  for (let u = uSpan[0]; u <= uSpan[1] + 1e-6; u += pitch) {
+    list.push({ x: u, y: (sBot + sTop) / 2, z: out });
+  }
+  instanced(new THREE.BoxGeometry(bar, sTop - sBot, depth - 0.010), M.wood, list, G, '木格栅竖条');
 
   // 背部横梁（让格栅是结构，不是贴片）
   [-h / 2 + 0.25, 0, h / 2 - 0.25].forEach((dy, i) => {
@@ -53986,7 +54003,7 @@ function screen({ uSpan, ySpan, bar = 0.10, pitch = 0.25, depth = 0.26, out = 0.
   });
   // 上下封边（金属）
   slab(w + 0.20, 0.10, depth + 0.06, M.metal, cx, ySpan[1] + 0.05, out, G, 0.012).name = '格栅上封边';
-  slab(w + 0.20, 0.10, depth + 0.06, M.metal, cx, ySpan[0] - 0.05, out, G, 0.012).name = '格栅下封边';
+  slab(w + 0.20, 0.08, depth + 0.06, M.metal, cx, ySpan[0] - 0.04, out, G, 0.012).name = '格栅下封边';
   // 两侧立柱
   [-1, 1].forEach((s) => {
     box(0.11, h + 0.20, depth + 0.06, M.metal, cx + s * (w / 2 + 0.055), cy, out, G).name = '格栅边立柱';
@@ -53995,8 +54012,8 @@ function screen({ uSpan, ySpan, bar = 0.10, pitch = 0.25, depth = 0.26, out = 0.
   const n = list.length;
   info(G, name, {
     size: `${w.toFixed(2)} × ${h.toFixed(2)} m`,
-    mat: '硬木竖向格栅（断面 100×260）+ 铝合金封边',
-    note: `${n} 根竖条，中心距 ${(pitch * 1000).toFixed(0)}mm，背后 3 道横梁`,
+    mat: '硬木竖向格栅（断面 100×120）+ 铝合金封边',
+    note: `${n} 根竖条，中心距 ${(pitch * 1000).toFixed(0)}mm，上下木横档 + 背后 3 道横梁`,
     simple: '金属连接件与防腐处理未建模',
   });
   return G;
@@ -54098,7 +54115,7 @@ function mechBox({ x, y, z, w, h, d, root, name, kind = '空调室外机' }) {
 
 /* ================= 参数表 ================= */
 const P = {
-  site: { w: 60, d: 48 },
+  site: { w: 39, d: 28, cx: -2.4, cz: 0 },
 
   main: {
     x0: -9.0, x1: 9.0,     // 面宽 18.0
@@ -54133,12 +54150,13 @@ const P = {
             { u: [2.70, 4.20],   y: [4.40, 6.40] },
             { u: [-0.70, 0.70],  y: [4.40, 7.00] }], // 中部通高
     // —— 北立面主楼段（u = -世界 x）——
-    nDoor:  { u: [-4.10, -2.90], y: [0.00, 2.20] },  // 服务门 1.2m（已加宽）
-    nWin1: [{ u: [-5.40, -3.90], y: [1.50, 2.70] },
-            { u: [-2.70, -1.20], y: [1.50, 2.70] },
-            { u: [0.00, 1.50],   y: [1.50, 2.70] }],
-    nWin2: [{ u: [-5.40, -3.90], y: [4.40, 6.20] },
-            { u: [0.00, 1.50],   y: [4.40, 6.20] }],
+    nDoor:  { u: [-4.10, -2.90], y: [0.00, 2.20] },  // 服务门 1.2m
+    // 高窗必须避开门洞：左窗收到 -5.60~-4.30（与门留 0.20m 窗间墙）
+    nWin1: [{ u: [-5.60, -4.30], y: [1.50, 2.70] },
+            { u: [-2.50, -1.00], y: [1.50, 2.70] },
+            { u: [0.60, 2.10],   y: [1.50, 2.70] }],
+    nWin2: [{ u: [-5.60, -4.30], y: [4.40, 6.20] },
+            { u: [0.60, 2.10],   y: [4.40, 6.20] }],
     // —— 北立面车库段（u = -世界 x，世界 x ∈ [-14.4,-9] → u ∈ [9,14.4]）——
     gWin:  [{ u: [10.60, 12.10], y: [1.30, 2.30] }],
     // —— 西立面主楼段（u = 世界 z）——
@@ -54170,25 +54188,34 @@ function buildVilla(scene) {
   const reg = (g) => { if (g && g.userData.info) parts.push(g.userData.info); return g; };
 
   /* ---------- 地坪 ---------- */
-  const ground = box(P.site.w, 0.30, P.site.d, M.conc, 0, -0.15, 0, root);
+  const ground = box(P.site.w, 0.30, P.site.d, M.pave, P.site.cx, -0.15, P.site.cz, root);
   ground.name = '场地地坪';
   ground.castShadow = false;
 
   /* ---------- 场地铺装（让建筑落地，仅铺装不做绿化/车辆） ---------- */
   const SP = new THREE.Group(); SP.name = '场地铺装'; root.add(SP);
-  // 建筑周边一圈铺装
-  const ring = box(P.main.x1 - gr.x0 + 2.6, 0.06, (m.z1 + P.cant.south) - m.z0 + 2.6, M.concDark,
-    (gr.x0 + m.x1) / 2, 0.03, (m.z0 + m.z1 + P.cant.south) / 2, SP, { cast: false });
-  ring.name = '周边铺装';
-  // 车库车道（卷帘门朝西，车道向西引出）
-  const drive = box(11.0, 0.07, 5.60, M.dark, gr.x0 - 5.5, 0.035, -2.6, SP, { cast: false });
+
+  // 铺装直接做在场地底板上：0.9m 石材分格缝（真几何细条，非贴图）
+  // 用 InstancedMesh 批绘制：74 条缝若各自成 Mesh 会多出 74 次 DrawCall
+  const jmG = new THREE.Group(); jmG.name = '铺装分格缝'; SP.add(jmG);
+  const sx0 = P.site.cx - P.site.w / 2 + 0.45, sx1 = P.site.cx + P.site.w / 2 - 0.45;
+  const sz0 = P.site.cz - P.site.d / 2 + 0.45, sz1 = P.site.cz + P.site.d / 2 - 0.45;
+  const jxList = [], jzList = [];
+  for (let x = sx0; x <= sx1 + 1e-6; x += 0.9) jxList.push({ x, y: 0.002, z: (sz0 + sz1) / 2 });
+  for (let z = sz0; z <= sz1 + 1e-6; z += 0.9) jzList.push({ x: (sx0 + sx1) / 2, y: 0.002, z });
+  instanced(new THREE.BoxGeometry(0.018, 0.004, sz1 - sz0), M.joint, jxList, jmG, '分格缝-纵');
+  instanced(new THREE.BoxGeometry(sx1 - sx0, 0.004, 0.018), M.joint, jzList, jmG, '分格缝-横');
+
+  // 车库车道（卷帘门朝西）：深灰沥青，收在场地内
+  const drive = box(4.60, 0.05, 5.40, M.asphalt, gr.x0 - 2.30, 0.025, -2.9, SP, { cast: false });
   drive.name = '车库车道（简化：无路面标线与坡度）';
   // 入口步道（主入口向南引出）
-  const walk = box(3.40, 0.07, 7.0, M.concDark, 0, 0.035, m.z1 + P.cant.south + 3.0, SP, { cast: false });
+  const walk = box(3.40, 0.05, 6.4, M.paveWalk, 0, 0.025, m.z1 + P.cant.south + 2.7, SP, { cast: false });
   walk.name = '入口步道';
+
   info(SP, '场地铺装', {
-    size: `周边通铺 1.3m 宽 · 车道 11.0×5.6m · 入口步道 3.4×7.0m`,
-    mat: '浅灰铺装 + 沥青车道',
+    size: `${P.site.w.toFixed(1)}×${P.site.d.toFixed(1)}m 石材铺装（0.9m 分格缝）· 车道 4.6×5.4m · 入口步道 3.4×6.4m`,
+    mat: '浅灰石材铺装 + 深灰沥青车道',
     note: '仅做铺装；按你要求不含绿化、树木、车辆等环境要素',
     simple: '简化：无路面标线、无排水坡度、无路缘石细节',
   });
@@ -54388,11 +54415,13 @@ function buildVilla(scene) {
     box(len + 0.06, 0.035, 0.035, M.metal, 0, -es.thick / 2 - 0.02, es.out + 0.03, g).name = '遮阳滴水';
     // 侧封板
     [-1, 1].forEach((s) => box(0.06, es.thick, es.out, M.metal, s * (len / 2 + 0.02), 0, es.out / 2, g).name = '遮阳侧封板');
-    // 拉杆（简化：两根斜杆，从板外端斜拉回墙面下方）
+    // 拉杆：从板外端上表面斜拉回墙面下方（两端必须正好落在板端与墙面上）
     [-1, 1].forEach((s, k) => {
-      const L = Math.hypot(es.out, 0.90);
-      const r = box(0.045, L, 0.045, M.steel, s * (len / 2 - 0.25), -0.45, es.out / 2, g);
-      r.rotation.x = Math.atan2(es.out, 0.90);
+      const drop = 0.90;                       // 墙面锚点距板面的垂直距离
+      const L = Math.hypot(es.out, drop);
+      const r = box(0.045, L, 0.045, M.steel, s * (len / 2 - 0.25), -drop / 2, es.out / 2, g);
+      // 杆轴由 (y=-drop, z=0) 指向 (y=0, z=out)：即板外端斜拉回墙面
+      r.rotation.x = Math.atan2(es.out, drop) + Math.PI;
       r.name = `遮阳拉杆-${si + 1}-${k + 1}（简化）`;
     });
     D.e1.put(g, ES, (a + b) / 2, es.y, 0);
@@ -54545,8 +54574,12 @@ function buildVilla(scene) {
   reg(PV);
 
   // —— 采光天窗（一层进深 12m，中部补光）——
-  [[-3.6, 1.0], [3.6, 1.0], [0, -2.4]].forEach(([x, z], i) => reg(skylight({
-    x, z, w: 2.60, d: 1.30, y: m.f2 + 0.30, root: RF, name: `屋面采光天窗-${i + 1}`,
+  // 光伏阵列占 z ∈ [m.z1-1.60-td, m.z1-1.60]，天窗必须落在其北侧空区（z 更小），
+  // 否则会与光伏板在平面上重叠
+  const pvZmin = m.z1 - 1.60 - td;
+  const skyZ = pvZmin - 1.90;
+  [[-4.60, 0], [4.60, 0], [0, 0]].forEach(([dx], i) => reg(skylight({
+    x: dx, z: skyZ, w: 3.20, d: 1.40, y: m.f2 + 0.30, root: RF, name: `屋面采光天窗-${i + 1}`,
   })));
 
   // —— 屋面设备平台 ——
@@ -54581,16 +54614,17 @@ function buildVilla(scene) {
   reg(downpipe({ x: m.x1 - 0.12, z: m.z0 + 0.12, y0: 0, y1: m.f2, root: HW, name: '雨水立管-2（东北背面）' }));
   // 空调室外机（北立面，带百叶罩）
   reg(mechBox({
-    x: 6.2, y: 0.30, z: m.z0 - 0.55, w: 1.10, h: 0.85, d: 0.55,
+    x: 6.10, y: 0.14, z: m.z0 - 0.55, w: 1.10, h: 0.85, d: 0.55,
     root: HW, name: '空调室外机-1', kind: '分体空调室外机',
   }));
   reg(mechBox({
-    x: 4.6, y: 0.30, z: m.z0 - 0.55, w: 1.10, h: 0.85, d: 0.55,
+    x: 4.70, y: 0.14, z: m.z0 - 0.55, w: 1.10, h: 0.85, d: 0.55,
     root: HW, name: '空调室外机-2', kind: '分体空调室外机',
   }));
+  // 百叶罩：外机最外缘 z=-6.825，罩移到 -6.95..-6.85，与外机留 25mm 净距（原值会穿插）
   reg(louver({
-    x: 5.4, y: 0.95, z: m.z0 - 0.78, w: 3.20, h: 1.00, d: 0.26,
-    ry: 0, root: HW, name: '空调外机百叶罩', blades: 12,
+    x: 5.40, y: 0.565, z: m.z0 - 0.90, w: 3.30, h: 1.15, d: 0.10,
+    ry: 0, root: HW, name: '空调外机百叶罩', blades: 13,
   }));
   // 入口壁灯
   [[-1.9], [1.9]].forEach(([x], i) => {
@@ -54685,6 +54719,41 @@ function buildVilla(scene) {
   return { root, parts };
 }
 
+
+/* ============================================================
+   自检：同一立面上洞口是否重叠（重叠会让墙板 Shape 挖洞自相交，
+   挤出后出现斜切多边形等破面）
+============================================================ */
+function checkOpenings() {
+  const bad = [];
+  const facades = [
+    ['南一层', P.open.sDoor, P.open.sWinL, P.open.sWinR].filter(Boolean),
+    ['南二层', P.open.sWin2].filter(Boolean),
+    ['东一层', ...P.open.eWin1],
+    ['东二层', ...P.open.eWin2],
+    ['北一层', P.open.nDoor, ...P.open.nWin1],
+    ['北二层', ...P.open.nWin2],
+    ['北车库', ...P.open.gWin],
+    ['西一层', ...P.open.wWin1],
+    ['西二层', P.open.wDoor2, ...P.open.wWin2],
+    ['西车库', P.open.gShutter],
+    ['车库南', P.open.gsVent],
+  ];
+  facades.forEach(([nm, ...list]) => {
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const A = list[i], B = list[j];
+        const ox = Math.min(A.u[1], B.u[1]) - Math.max(A.u[0], B.u[0]);
+        const oy = Math.min(A.y[1], B.y[1]) - Math.max(A.y[0], B.y[0]);
+        if (ox > 1e-6 && oy > 1e-6) {
+          bad.push(`${nm}: 洞口${i + 1}与洞口${j + 1} 重叠 ${ox.toFixed(2)}m×${oy.toFixed(2)}m`);
+        }
+      }
+    }
+  });
+  return bad;
+}
+
 /* ===== dev.html 内联脚本 ===== */
 
 
@@ -54704,18 +54773,78 @@ renderer.shadowMap.autoUpdate = false;      // 静态场景：阴影只烘一次
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-setupLights(scene, { shadowSpan: 30, sunI: 3.1, hemiI: 0.30, envI: 0.60, sunAz: 140, sunEl: 40 });
+// 太阳放在西南上空（对应默认机位 theta≈-0.86 的方向），让可见立面与地面都受光
+setupLights(scene, { background: false, shadowSpan: 22, shadowMap: 4096, sunI: 3.0, hemiI: 0.52, envI: 0.50, sunAz: 205, sunEl: 46 });
+// 背景用柔和冷灰，不用环境贴图（环境贴图当地平线会出现军绿色带）
+scene.background = new THREE.Color(0xe8ecf1);
 
 /* ================= 模型 ================= */
 const { root: villa, parts } = buildVilla(scene);
+// 调试：?audit=1 输出各立面外挂构件清单（写入 title，供无头浏览器读取）
+if (new URLSearchParams(location.search).get('ovl')) {
+  const bad = checkOpenings();
+  // 大面构件清单（找出意外的大色块）
+  if (new URLSearchParams(location.search).get('big')) {
+    out.length = 0;
+    items.filter(o => (o.b.max.x - o.b.min.x) * (o.b.max.z - o.b.min.z) > 25)
+      .sort((a, b2) => (b2.b.max.x - b2.b.min.x) * (b2.b.max.z - b2.b.min.z) - (a.b.max.x - a.b.min.x) * (a.b.max.z - a.b.min.z))
+      .forEach(o => out.push(`${o.n}|dy${o.b.min.y.toFixed(3)}~${o.b.max.y.toFixed(3)}|${(o.b.max.x - o.b.min.x).toFixed(1)}x${(o.b.max.z - o.b.min.z).toFixed(1)}`));
+  }
+  const pre = document.createElement('pre');
+  pre.id = 'auditOut';
+  pre.textContent = bad.length ? bad.join('\n') : 'OK 无洞口重叠';
+  document.body.appendChild(pre);
+}
+if (new URLSearchParams(location.search).get('audit')) {
+  villa.updateMatrixWorld(true);
+  const items = [];
+  villa.traverse(o => {
+    if (!o.isMesh) return;
+    const b = new THREE.Box3().setFromObject(o);
+    if (!isFinite(b.min.x)) return;
+    items.push({ n: o.name || '(未命名)', b, tri: (o.geometry?.index?.count || 0) / 3 });
+  });
+  const groups = {
+    '北外挂(z<-6, |x|<15)': items.filter(o => o.b.max.z <= -5.99 && o.b.min.y < 8.2 && o.b.min.x > -15.2),
+    '东外挂(x>9)': items.filter(o => o.b.min.x >= 8.99 && o.b.min.y < 8.2),
+    '南外挂(z>6)': items.filter(o => o.b.min.z >= 5.99 && o.b.min.y < 8.2),
+    '西外挂(x<-9)': items.filter(o => o.b.max.x <= -8.99 && o.b.min.y < 8.2),
+  };
+  const out = [];
+  for (const [k, arr] of Object.entries(groups)) {
+    out.push('[' + k + ' n=' + arr.length + ']');
+    arr.sort((a, b2) => a.b.min.y - b2.b.min.y || a.b.min.x - b2.b.min.x)
+      .forEach(o => out.push(`${o.n}|x${o.b.min.x.toFixed(2)}~${o.b.max.x.toFixed(2)}|y${o.b.min.y.toFixed(2)}~${o.b.max.y.toFixed(2)}|z${o.b.min.z.toFixed(2)}~${o.b.max.z.toFixed(2)}`));
+  }
+  // 额外：列出与指定盒体相交的构件
+  const qb = new URLSearchParams(location.search).get('box');
+  if (qb) {
+    const [x0,x1,y0,y1,z0,z1] = qb.split(',').map(Number);
+    const BB = new THREE.Box3(new THREE.Vector3(x0,y0,z0), new THREE.Vector3(x1,y1,z1));
+    out.length = 0;
+    items.filter(o => o.b.intersectsBox(BB)).forEach(o => out.push(`${o.n}|x${o.b.min.x.toFixed(2)}~${o.b.max.x.toFixed(2)}|y${o.b.min.y.toFixed(2)}~${o.b.max.y.toFixed(2)}|z${o.b.min.z.toFixed(2)}~${o.b.max.z.toFixed(2)}`));
+  }
+  // 大面构件清单（找出意外的大色块）
+  if (new URLSearchParams(location.search).get('big')) {
+    out.length = 0;
+    items.filter(o => (o.b.max.x - o.b.min.x) * (o.b.max.z - o.b.min.z) > 25)
+      .sort((a, b2) => (b2.b.max.x - b2.b.min.x) * (b2.b.max.z - b2.b.min.z) - (a.b.max.x - a.b.min.x) * (a.b.max.z - a.b.min.z))
+      .forEach(o => out.push(`${o.n}|dy${o.b.min.y.toFixed(3)}~${o.b.max.y.toFixed(3)}|${(o.b.max.x - o.b.min.x).toFixed(1)}x${(o.b.max.z - o.b.min.z).toFixed(1)}`));
+  }
+  const pre = document.createElement('pre');
+  pre.id = 'auditOut';
+  pre.textContent = out.join('\n');
+  document.body.appendChild(pre);
+  document.title = 'AUDIT-DONE n=' + out.length;
+}
 
 /* ================= 相机 ================= */
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.08, 400);
 
 // —— 环绕（球坐标）——
 const orbit = {
-  theta: -0.72, phi: 1.02, dist: 38,
-  thetaT: -0.72, phiT: 1.02, distT: 35,
+  theta: -0.86, phi: 1.24, dist: 34,
+  thetaT: -0.86, phiT: 1.24, distT: 31,
   target: new THREE.Vector3(-2.0, 3.4, 0.4),
   targetT: new THREE.Vector3(-2.0, 3.4, 0.4),
 };
@@ -54888,7 +55017,7 @@ document.getElementById('cardClose').onclick = () => {
 
 /* ================= 预设视点（可近距离看门窗雨棚） ================= */
 const VS = [
-  { t: [-2.0, 3.2, 0.4], th: -0.72, ph: 1.00, d: 34 },
+  { t: [-3.4, 3.0, -0.6], th: -0.86, ph: 1.22, d: 31 },
   { t: [0.0, 2.0, 7.2], th: -0.42, ph: 1.16, d: 9.0 },
   { t: [-5.2, 1.8, 6.2], th: -0.20, ph: 1.24, d: 7.5 },
   { t: [-4.8, 5.8, 8.0], th: -0.30, ph: 1.10, d: 7.0 },
@@ -54910,6 +55039,18 @@ document.querySelectorAll('.views button').forEach(b => {
   b.onclick = () => goto(+b.dataset.v, false);
 });
 const qv = new URLSearchParams(location.search).get('v');
+// 调试：?cam=theta,phi,dist,tx,ty,tz 直接指定机位（不写入发布版 UI）
+const qcam = new URLSearchParams(location.search).get('cam');
+if (qcam) {
+  const a = qcam.split(',').map(Number);
+  if (a.length === 6 && a.every(n => Number.isFinite(n))) {
+    orbit.target.set(a[3], a[4], a[5]);
+    orbit.targetT.copy(orbit.target);
+    orbit.theta = orbit.thetaT = a[0];
+    orbit.phi = orbit.phiT = a[1];
+    orbit.dist = orbit.distT = a[2];
+  }
+}
 
 /* ================= 模式 ================= */
 const bO = document.getElementById('mOrbit'), bW = document.getElementById('mWalk');
