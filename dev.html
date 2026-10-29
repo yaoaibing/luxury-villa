@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>豪华别墅 · 外立面数字孪生</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#0e141d;
+    font-family:"Microsoft YaHei","PingFang SC","Helvetica Neue",sans-serif; color:#e8edf4; }
+  canvas { display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+  canvas:active { cursor:grabbing; }
+  .ui { position:fixed; pointer-events:none; }
+
+  .top { left:16px; top:14px; }
+  .top h1 { margin:0; font-size:16px; font-weight:700; letter-spacing:.5px; }
+  .top p { margin:3px 0 0; font-size:12px; color:#8fa1b8; }
+
+  .modes { position:fixed; right:16px; top:14px; display:flex; gap:6px; pointer-events:auto; }
+  .modes button { background:rgba(22,30,42,.86); color:#c8d4e4; border:1px solid #2c3849;
+    padding:7px 13px; font-size:12.5px; border-radius:4px; cursor:pointer; font-family:inherit; }
+  .modes button:hover { background:rgba(34,46,64,.95); color:#fff; }
+  .modes button.on { background:#2f7d5c; border-color:#3d9a72; color:#fff; }
+
+  .views { position:fixed; right:16px; top:58px; display:flex; flex-direction:column; gap:5px;
+    align-items:flex-end; pointer-events:auto; }
+  .views button { background:rgba(22,30,42,.78); color:#a9b8cc; border:1px solid #2c3849;
+    padding:5px 11px; font-size:12px; border-radius:4px; cursor:pointer; font-family:inherit;
+    min-width:104px; text-align:right; }
+  .views button:hover { background:rgba(34,46,64,.92); color:#fff; }
+
+  .hint { left:16px; bottom:14px; font-size:11.5px; color:#7c8da3; line-height:1.7; }
+  .hint b { color:#a9b8cc; font-weight:600; }
+
+  .stat { right:16px; bottom:14px; font-size:11px; color:#6e7d92; text-align:right; line-height:1.6; }
+
+  .card { right:16px; bottom:64px; width:290px; background:rgba(16,23,33,.94);
+    border:1px solid #2c3849; border-left:3px solid #3d9a72; border-radius:5px;
+    padding:12px 14px; display:none; pointer-events:auto; }
+  .card.show { display:block; }
+  .card h3 { margin:0 0 8px; font-size:14px; color:#fff; font-weight:700; }
+  .card dl { margin:0; font-size:12px; line-height:1.65; }
+  .card dt { color:#7c8da3; float:left; width:52px; clear:left; }
+  .card dd { margin:0 0 0 52px; color:#d6e0ee; }
+  .card .sim { margin-top:8px; padding-top:8px; border-top:1px solid #26303f;
+    font-size:11.5px; color:#c08a4a; }
+  .card .close { position:absolute; right:8px; top:7px; color:#6e7d92; cursor:pointer;
+    font-size:15px; line-height:1; pointer-events:auto; }
+
+  .cross { left:50%; top:50%; width:14px; height:14px; margin:-7px 0 0 -7px; display:none; }
+  .cross.show { display:block; }
+  .cross::before, .cross::after { content:''; position:absolute; background:rgba(255,255,255,.75); }
+  .cross::before { left:6px; top:0; width:2px; height:14px; }
+  .cross::after { left:0; top:6px; width:14px; height:2px; }
+
+  .name { font-size:12.5px; background:rgba(16,23,33,.9); padding:3px 9px; border-radius:3px;
+    display:none; white-space:nowrap; border:1px solid #2c3849; }
+  .name.show { display:block; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div class="ui top">
+  <h1>豪华别墅 · 外立面数字孪生</h1>
+  <p>三渲实体几何 · 洞口/墙厚/板缝/倒角均为真实几何 · 仅光伏与门牌使用贴图</p>
+</div>
+
+<div class="modes">
+  <button id="mOrbit" class="on">环绕</button>
+  <button id="mWalk">漫游</button>
+</div>
+
+<div class="views">
+  <button data-v="0">全景</button>
+  <button data-v="1">主入口雨棚</button>
+  <button data-v="2">南立面落地窗</button>
+  <button data-v="3">二层木格栅</button>
+  <button data-v="4">车库卷帘门</button>
+  <button data-v="5">露台栏板</button>
+  <button data-v="6">屋面光伏</button>
+</div>
+
+<div class="ui hint">
+  <b>环绕</b>：左键拖拽旋转 · 滚轮缩放 · 右键或 Shift+拖拽平移　　<b>漫游</b>：WASD/方向键行走 · 左键拖拽转向 · 准星点击构件<br>
+  <b>拾取</b>：鼠标悬停高亮，点击查看详情（尺寸 / 材质 / 做法 / 简化说明）
+</div>
+
+<div class="ui stat" id="stat"></div>
+
+<div class="card" id="card">
+  <span class="close" id="cardClose">×</span>
+  <h3 id="cName"></h3>
+  <dl>
+    <dt>尺寸</dt><dd id="cSize"></dd>
+    <dt>材质</dt><dd id="cMat"></dd>
+    <dt>做法</dt><dd id="cNote"></dd>
+  </dl>
+  <div class="sim" id="cSim"></div>
+</div>
+
+<div class="ui cross" id="cross"></div>
+<div class="ui name" id="hoverName"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { buildVilla, P } from './src/model.js';
+import { setupLights } from './src/core.js';
+
+/* ================= 渲染器 ================= */
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.02;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.autoUpdate = false;      // 静态场景：阴影只烘一次 → 省一整趟渲染
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+setupLights(scene, { shadowSpan: 30, sunI: 3.1, hemiI: 0.30, envI: 0.60, sunAz: 140, sunEl: 40 });
+
+/* ================= 模型 ================= */
+const { root: villa, parts } = buildVilla(scene);
+
+/* ================= 相机 ================= */
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.08, 400);
+
+// —— 环绕（球坐标）——
+const orbit = {
+  theta: -0.72, phi: 1.02, dist: 38,
+  thetaT: -0.72, phiT: 1.02, distT: 35,
+  target: new THREE.Vector3(-2.0, 3.4, 0.4),
+  targetT: new THREE.Vector3(-2.0, 3.4, 0.4),
+};
+// —— 漫游（第一人称）——
+const walk = {
+  pos: new THREE.Vector3(-2.0, 1.68, 14.0),
+  yaw: Math.PI, pitch: -0.06,
+  yawT: Math.PI, pitchT: -0.06,
+  vel: new THREE.Vector3(),
+};
+let mode = 'orbit';
+
+const m = P.main, gr = P.garage;
+const SOLIDS = [
+  { x0: m.x0 - 0.55, x1: m.x1 + 0.55, z0: m.z0 - 0.55, z1: m.z1 + P.cant.south + 0.55 },
+  { x0: gr.x0 - 0.55, x1: gr.x1 + 0.55, z0: gr.z0 - 0.55, z1: gr.z1 + 0.55 },
+];
+const inSolid = (x, z) => SOLIDS.some(s => x > s.x0 && x < s.x1 && z > s.z0 && z < s.z1);
+
+function applyCamera() {
+  if (mode === 'orbit') {
+    const s = Math.sin(orbit.phi), c = Math.cos(orbit.phi);
+    camera.position.set(
+      orbit.target.x + orbit.dist * s * Math.sin(orbit.theta),
+      orbit.target.y + orbit.dist * c,
+      orbit.target.z + orbit.dist * s * Math.cos(orbit.theta),
+    );
+    camera.lookAt(orbit.target);
+  } else {
+    camera.position.copy(walk.pos);
+    camera.rotation.set(0, 0, 0);
+    camera.rotateY(walk.yaw);
+    camera.rotateX(walk.pitch);
+  }
+}
+
+/* ================= 交互 ================= */
+let drag = null;
+const cv = renderer.domElement;
+cv.addEventListener('contextmenu', e => e.preventDefault());
+
+cv.addEventListener('pointerdown', (e) => {
+  cv.setPointerCapture(e.pointerId);
+  drag = { x: e.clientX, y: e.clientY, btn: e.button, shift: e.shiftKey, moved: 0 };
+});
+cv.addEventListener('pointermove', (e) => {
+  if (drag) {
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    drag.moved += Math.abs(dx) + Math.abs(dy);
+    drag.x = e.clientX; drag.y = e.clientY;
+    if (mode === 'orbit') {
+      if (drag.btn === 2 || drag.shift) {
+        // 平移
+        const k = orbit.dist * 0.0016;
+        const right = new THREE.Vector3(Math.cos(orbit.theta), 0, -Math.sin(orbit.theta));
+        const fwd = new THREE.Vector3(Math.sin(orbit.theta), 0, Math.cos(orbit.theta));
+        orbit.targetT.addScaledVector(right, -dx * k).addScaledVector(fwd, -dy * k);
+        orbit.targetT.y = Math.max(0.2, Math.min(9, orbit.targetT.y));
+      } else {
+        orbit.thetaT -= dx * 0.0052;
+        orbit.phiT = Math.max(0.16, Math.min(1.50, orbit.phiT - dy * 0.0045));
+      }
+    } else {
+      walk.yawT -= dx * 0.0042;
+      walk.pitchT = Math.max(-1.1, Math.min(0.9, walk.pitchT - dy * 0.0035));
+    }
+  } else if (mode === 'orbit') {
+    hover(e.clientX, e.clientY);
+  }
+});
+cv.addEventListener('pointerup', (e) => {
+  if (drag && drag.moved < 6) pick(e.clientX, e.clientY);
+  drag = null;
+});
+cv.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (mode === 'orbit') {
+    orbit.distT = Math.max(2.2, Math.min(120, orbit.distT * (1 + Math.sign(e.deltaY) * 0.11)));
+  } else {
+    walk.pos.y = Math.max(0.9, Math.min(6.5, walk.pos.y - Math.sign(e.deltaY) * 0.22));
+  }
+}, { passive: false });
+
+// 键盘（漫游）
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'KeyF') setMode(mode === 'orbit' ? 'walk' : 'orbit'); });
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+function walkStep(dt) {
+  const sp = (keys.ShiftLeft || keys.ShiftRight ? 6.2 : 2.6) * dt;
+  const fwd = new THREE.Vector3(-Math.sin(walk.yaw), 0, -Math.cos(walk.yaw));
+  const right = new THREE.Vector3(Math.cos(walk.yaw), 0, -Math.sin(walk.yaw));
+  const mv = new THREE.Vector3();
+  if (keys.KeyW || keys.ArrowUp) mv.add(fwd);
+  if (keys.KeyS || keys.ArrowDown) mv.sub(fwd);
+  if (keys.KeyA || keys.ArrowLeft) mv.sub(right);
+  if (keys.KeyD || keys.ArrowRight) mv.add(right);
+  if (mv.lengthSq() < 1e-6) return;
+  mv.normalize().multiplyScalar(sp);
+  // 分轴推进，允许沿墙滑行，禁止穿墙
+  const nx = walk.pos.x + mv.x, nz = walk.pos.z + mv.z;
+  if (!inSolid(nx, walk.pos.z)) walk.pos.x = Math.max(-26, Math.min(26, nx));
+  if (!inSolid(walk.pos.x, nz)) walk.pos.z = Math.max(-22, Math.min(26, nz));
+}
+
+/* ================= 构件拾取 ================= */
+const ray = new THREE.Raycaster();
+const UNIT = () => new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1));
+const hlBox = new THREE.Box3Helper(UNIT(), 0x4fd39a);
+hlBox.visible = false;
+scene.add(hlBox);
+const selBox = new THREE.Box3Helper(UNIT(), 0xffc247);
+selBox.visible = false;
+scene.add(selBox);
+
+function groupOf(obj) {
+  let o = obj;
+  while (o) {
+    if (o.userData && o.userData.info) return o;
+    o = o.parent;
+  }
+  return null;
+}
+function castAt(x, y) {
+  ray.setFromCamera(new THREE.Vector2(
+    (x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1), camera);
+  const hits = ray.intersectObject(villa, true);
+  for (const h of hits) {
+    if (!h.object.visible) continue;
+    const g = groupOf(h.object);
+    if (g) return g;
+  }
+  return null;
+}
+function hover(x, y) {
+  const g = castAt(x, y);
+  const el = document.getElementById('hoverName');
+  if (g) {
+    hlBox.box.copy(new THREE.Box3().setFromObject(g));
+    hlBox.visible = true;
+    el.textContent = g.userData.info.name;
+    el.style.left = (x + 14) + 'px';
+    el.style.top = (y + 14) + 'px';
+    el.classList.add('show');
+  } else {
+    hlBox.visible = false;
+    el.classList.remove('show');
+  }
+}
+function pick(x, y) {
+  if (mode === 'walk') { x = innerWidth / 2; y = innerHeight / 2; }
+  const g = castAt(x, y);
+  if (!g) { selBox.visible = false; document.getElementById('card').classList.remove('show'); return; }
+  const i = g.userData.info;
+  selBox.box.copy(new THREE.Box3().setFromObject(g));
+  selBox.visible = true;
+  document.getElementById('cName').textContent = i.name;
+  document.getElementById('cSize').textContent = i.size;
+  document.getElementById('cMat').textContent = i.mat;
+  document.getElementById('cNote').textContent = i.note || '—';
+  const sim = document.getElementById('cSim');
+  sim.textContent = i.simple ? '简化：' + i.simple : '';
+  sim.style.display = i.simple ? 'block' : 'none';
+  document.getElementById('card').classList.add('show');
+}
+document.getElementById('cardClose').onclick = () => {
+  document.getElementById('card').classList.remove('show');
+  selBox.visible = false;
+};
+
+/* ================= 预设视点（可近距离看门窗雨棚） ================= */
+const VS = [
+  { t: [-2.0, 3.2, 0.4], th: -0.72, ph: 1.00, d: 34 },
+  { t: [0.0, 2.0, 7.2], th: -0.42, ph: 1.16, d: 9.0 },
+  { t: [-5.2, 1.8, 6.2], th: -0.20, ph: 1.24, d: 7.5 },
+  { t: [-4.8, 5.8, 8.0], th: -0.30, ph: 1.10, d: 7.0 },
+  { t: [-14.4, 1.6, -2.5], th: -1.62, ph: 1.22, d: 8.5 },
+  { t: [-12.2, 4.5, -3.0], th: -1.30, ph: 1.14, d: 7.5 },
+  { t: [0.0, 7.6, 0.6], th: -0.90, ph: 0.62, d: 17 },
+];
+function goto(i, instant) {
+  const v = VS[i];
+  setMode('orbit');
+  orbit.targetT.set(v.t[0], v.t[1], v.t[2]);
+  orbit.thetaT = v.th; orbit.phiT = v.ph; orbit.distT = v.d;
+  if (instant) {
+    orbit.target.copy(orbit.targetT);
+    orbit.theta = v.th; orbit.phi = v.ph; orbit.dist = v.d;
+  }
+}
+document.querySelectorAll('.views button').forEach(b => {
+  b.onclick = () => goto(+b.dataset.v, false);
+});
+const qv = new URLSearchParams(location.search).get('v');
+
+/* ================= 模式 ================= */
+const bO = document.getElementById('mOrbit'), bW = document.getElementById('mWalk');
+function setMode(mo) {
+  mode = mo;
+  bO.classList.toggle('on', mo === 'orbit');
+  bW.classList.toggle('on', mo === 'walk');
+  document.getElementById('cross').classList.toggle('show', mo === 'walk');
+  hlBox.visible = false;
+  document.getElementById('hoverName').classList.remove('show');
+  if (mo === 'walk') {
+    // 从当前机位落到地面，朝向建筑
+    walk.pos.set(camera.position.x, 1.68, camera.position.z);
+    if (inSolid(walk.pos.x, walk.pos.z)) walk.pos.set(walk.pos.x, 1.68, m.z1 + 4.5);
+    walk.yaw = walk.yawT = Math.atan2(
+      -(-2.0 - walk.pos.x), -(0.4 - walk.pos.z));
+    walk.pitch = walk.pitchT = -0.04;
+  }
+}
+bO.onclick = () => setMode('orbit');
+bW.onclick = () => setMode('walk');
+// ?v=N 直达预设视点（截图 / 分享用）
+if (qv !== null && VS[+qv]) goto(+qv, true);
+
+/* ================= 主循环 ================= */
+const stat = document.getElementById('stat');
+let last = performance.now(), frames = 0, acc = 0;
+
+function updateStat(fps) {
+  const inf = renderer.info;
+  stat.innerHTML =
+    `${fps ? fps.toFixed(0) + ' FPS　·　' : ''}DrawCall ${inf.render.calls}　·　三角面 ${(inf.render.triangles / 1000).toFixed(0)}k<br>`
+    + `可拾取构件 ${parts.length} 项　·　贴图仅 2 张（光伏 / 门牌）　·　静态阴影单次烘焙`;
+}
+
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+
+  if (mode === 'orbit') {
+    const k = 1 - Math.pow(0.0016, dt);
+    orbit.theta += (orbit.thetaT - orbit.theta) * k;
+    orbit.phi += (orbit.phiT - orbit.phi) * k;
+    orbit.dist += (orbit.distT - orbit.dist) * k;
+    orbit.target.lerp(orbit.targetT, k);
+  } else {
+    walkStep(dt);
+    const k = 1 - Math.pow(0.0008, dt);
+    walk.yaw += (walk.yawT - walk.yaw) * k;
+    walk.pitch += (walk.pitchT - walk.pitch) * k;
+  }
+  applyCamera();
+  renderer.render(scene, camera);
+
+  acc += dt; frames++;
+  if (acc > 0.25) { updateStat(frames / acc); acc = 0; frames = 0; }
+  requestAnimationFrame(loop);
+}
+// 首帧：烘焙静态阴影并出一次统计
+renderer.shadowMap.needsUpdate = true;
+applyCamera();
+renderer.render(scene, camera);
+updateStat(0);
+requestAnimationFrame(loop);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.needsUpdate = true;
+});
+window.__ready = true;
+</script>
+</body>
+</html>
