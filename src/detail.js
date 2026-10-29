@@ -6,7 +6,7 @@
    每个构件返回 Group，并写入 userData.info（供网页端拾取展示）。
    ============================================================ */
 import * as THREE from 'three';
-import { M, box, slab, instanced } from './core.js';
+import { M, box, slab, instanced, pvTranslucentTexture } from './core.js';
 
 /** 写入构件信息（网页端拾取时展示） */
 export function info(g, name, o = {}) {
@@ -500,6 +500,51 @@ export function screen({ uSpan, ySpan, bar = 0.10, pitch = 0.25, depth = 0.12, o
 /* ============================================================
    12. 屋面天窗（采光带）
 ============================================================ */
+export function bipvRoof({
+  x, z, w, d, y, root, name, curb = 0.26, bay = 1.10,
+}) {
+  const G = new THREE.Group();
+  G.position.set(x, 0, z);
+  // 混凝土翻边（天窗基座）
+  box(w + 0.20, curb, d + 0.20, M.conc, 0, y + curb / 2, 0, G, { bevel: 0.012 }).name = '采光顶基座';
+  // 外圈铝合金压顶
+  box(w + 0.28, 0.06, d + 0.28, M.metal, 0, y + curb + 0.03, 0, G, { bevel: 0.010 }).name = '采光顶压顶';
+
+  // 纵向檩条（沿 d 向分隔成若干开间，真几何）
+  const bayN = Math.max(2, Math.round(w / bay));
+  const bw = w / bayN;
+  const ribList = [];
+  for (let i = 1; i < bayN; i++) {
+    ribList.push({ x: -w / 2 + bw * i, y: y + curb + 0.085, z: 0 });
+  }
+  instanced(new THREE.BoxGeometry(0.06, 0.10, d), M.metal, ribList, G, '采光顶檩条');
+
+  // 每开间一块 BIPV 组件（半透光，5° 找坡）；用同一贴图实例化
+  const panelMat = new THREE.MeshStandardMaterial({
+    map: pvTranslucentTexture(), roughness: 0.20, metalness: 0.30,
+    transparent: true, opacity: 0.62, color: 0xffffff, side: THREE.DoubleSide,
+  });
+  const panList = [];
+  for (let i = 0; i < bayN; i++) {
+    panList.push({ x: -w / 2 + bw * (i + 0.5), y: y + curb + 0.10, z: 0, rx: -5 * Math.PI / 180 });
+  }
+  instanced(new THREE.BoxGeometry(bw - 0.10, 0.03, d - 0.10), panelMat, panList, G, 'BIPV 透光组件');
+
+  // 横向分格（两端 + 中缝）
+  [-d / 2 + 0.06, d / 2 - 0.06].forEach((zz) => {
+    box(w, 0.09, 0.06, M.metal, 0, y + curb + 0.085, zz, G).name = '采光顶横档';
+  });
+
+  root.add(G);
+  info(G, name, {
+    size: `${w.toFixed(2)} × ${d.toFixed(2)} m，分 ${bayN} 个开间`,
+    mat: 'BIPV 透光光伏组件 + 铝合金檩条 + 混凝土翻边',
+    note: `基座高出屋面 ${(curb * 1000).toFixed(0)}mm；组件透光率约 40%，兼作采光与发电，5° 找坡`,
+    simple: '简化：未建模排水天沟、防坠落网与接线盒',
+  });
+  return G;
+}
+
 export function skylight({ x, z, w, d, y, root, name, curb = 0.28 }) {
   const G = new THREE.Group();
   G.position.set(x, 0, z);
