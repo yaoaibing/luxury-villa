@@ -106,7 +106,7 @@
 
 <script type="module">
 import * as THREE from 'three';
-import { buildVilla, P } from './src/model.js';
+import { buildVilla, P, checkOpenings } from './src/model.js';
 import { setupLights } from './src/core.js';
 
 /* ================= 渲染器 ================= */
@@ -122,18 +122,78 @@ renderer.shadowMap.autoUpdate = false;      // 静态场景：阴影只烘一次
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-setupLights(scene, { shadowSpan: 30, sunI: 3.1, hemiI: 0.30, envI: 0.60, sunAz: 140, sunEl: 40 });
+// 太阳放在西南上空（对应默认机位 theta≈-0.86 的方向），让可见立面与地面都受光
+setupLights(scene, { background: false, shadowSpan: 22, shadowMap: 4096, sunI: 3.0, hemiI: 0.52, envI: 0.50, sunAz: 205, sunEl: 46 });
+// 背景用柔和冷灰，不用环境贴图（环境贴图当地平线会出现军绿色带）
+scene.background = new THREE.Color(0xe8ecf1);
 
 /* ================= 模型 ================= */
 const { root: villa, parts } = buildVilla(scene);
+// 调试：?audit=1 输出各立面外挂构件清单（写入 title，供无头浏览器读取）
+if (new URLSearchParams(location.search).get('ovl')) {
+  const bad = checkOpenings();
+  // 大面构件清单（找出意外的大色块）
+  if (new URLSearchParams(location.search).get('big')) {
+    out.length = 0;
+    items.filter(o => (o.b.max.x - o.b.min.x) * (o.b.max.z - o.b.min.z) > 25)
+      .sort((a, b2) => (b2.b.max.x - b2.b.min.x) * (b2.b.max.z - b2.b.min.z) - (a.b.max.x - a.b.min.x) * (a.b.max.z - a.b.min.z))
+      .forEach(o => out.push(`${o.n}|dy${o.b.min.y.toFixed(3)}~${o.b.max.y.toFixed(3)}|${(o.b.max.x - o.b.min.x).toFixed(1)}x${(o.b.max.z - o.b.min.z).toFixed(1)}`));
+  }
+  const pre = document.createElement('pre');
+  pre.id = 'auditOut';
+  pre.textContent = bad.length ? bad.join('\n') : 'OK 无洞口重叠';
+  document.body.appendChild(pre);
+}
+if (new URLSearchParams(location.search).get('audit')) {
+  villa.updateMatrixWorld(true);
+  const items = [];
+  villa.traverse(o => {
+    if (!o.isMesh) return;
+    const b = new THREE.Box3().setFromObject(o);
+    if (!isFinite(b.min.x)) return;
+    items.push({ n: o.name || '(未命名)', b, tri: (o.geometry?.index?.count || 0) / 3 });
+  });
+  const groups = {
+    '北外挂(z<-6, |x|<15)': items.filter(o => o.b.max.z <= -5.99 && o.b.min.y < 8.2 && o.b.min.x > -15.2),
+    '东外挂(x>9)': items.filter(o => o.b.min.x >= 8.99 && o.b.min.y < 8.2),
+    '南外挂(z>6)': items.filter(o => o.b.min.z >= 5.99 && o.b.min.y < 8.2),
+    '西外挂(x<-9)': items.filter(o => o.b.max.x <= -8.99 && o.b.min.y < 8.2),
+  };
+  const out = [];
+  for (const [k, arr] of Object.entries(groups)) {
+    out.push('[' + k + ' n=' + arr.length + ']');
+    arr.sort((a, b2) => a.b.min.y - b2.b.min.y || a.b.min.x - b2.b.min.x)
+      .forEach(o => out.push(`${o.n}|x${o.b.min.x.toFixed(2)}~${o.b.max.x.toFixed(2)}|y${o.b.min.y.toFixed(2)}~${o.b.max.y.toFixed(2)}|z${o.b.min.z.toFixed(2)}~${o.b.max.z.toFixed(2)}`));
+  }
+  // 额外：列出与指定盒体相交的构件
+  const qb = new URLSearchParams(location.search).get('box');
+  if (qb) {
+    const [x0,x1,y0,y1,z0,z1] = qb.split(',').map(Number);
+    const BB = new THREE.Box3(new THREE.Vector3(x0,y0,z0), new THREE.Vector3(x1,y1,z1));
+    out.length = 0;
+    items.filter(o => o.b.intersectsBox(BB)).forEach(o => out.push(`${o.n}|x${o.b.min.x.toFixed(2)}~${o.b.max.x.toFixed(2)}|y${o.b.min.y.toFixed(2)}~${o.b.max.y.toFixed(2)}|z${o.b.min.z.toFixed(2)}~${o.b.max.z.toFixed(2)}`));
+  }
+  // 大面构件清单（找出意外的大色块）
+  if (new URLSearchParams(location.search).get('big')) {
+    out.length = 0;
+    items.filter(o => (o.b.max.x - o.b.min.x) * (o.b.max.z - o.b.min.z) > 25)
+      .sort((a, b2) => (b2.b.max.x - b2.b.min.x) * (b2.b.max.z - b2.b.min.z) - (a.b.max.x - a.b.min.x) * (a.b.max.z - a.b.min.z))
+      .forEach(o => out.push(`${o.n}|dy${o.b.min.y.toFixed(3)}~${o.b.max.y.toFixed(3)}|${(o.b.max.x - o.b.min.x).toFixed(1)}x${(o.b.max.z - o.b.min.z).toFixed(1)}`));
+  }
+  const pre = document.createElement('pre');
+  pre.id = 'auditOut';
+  pre.textContent = out.join('\n');
+  document.body.appendChild(pre);
+  document.title = 'AUDIT-DONE n=' + out.length;
+}
 
 /* ================= 相机 ================= */
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.08, 400);
 
 // —— 环绕（球坐标）——
 const orbit = {
-  theta: -0.72, phi: 1.02, dist: 38,
-  thetaT: -0.72, phiT: 1.02, distT: 35,
+  theta: -0.86, phi: 1.24, dist: 34,
+  thetaT: -0.86, phiT: 1.24, distT: 31,
   target: new THREE.Vector3(-2.0, 3.4, 0.4),
   targetT: new THREE.Vector3(-2.0, 3.4, 0.4),
 };
@@ -306,7 +366,7 @@ document.getElementById('cardClose').onclick = () => {
 
 /* ================= 预设视点（可近距离看门窗雨棚） ================= */
 const VS = [
-  { t: [-2.0, 3.2, 0.4], th: -0.72, ph: 1.00, d: 34 },
+  { t: [-3.4, 3.0, -0.6], th: -0.86, ph: 1.22, d: 31 },
   { t: [0.0, 2.0, 7.2], th: -0.42, ph: 1.16, d: 9.0 },
   { t: [-5.2, 1.8, 6.2], th: -0.20, ph: 1.24, d: 7.5 },
   { t: [-4.8, 5.8, 8.0], th: -0.30, ph: 1.10, d: 7.0 },
@@ -328,6 +388,18 @@ document.querySelectorAll('.views button').forEach(b => {
   b.onclick = () => goto(+b.dataset.v, false);
 });
 const qv = new URLSearchParams(location.search).get('v');
+// 调试：?cam=theta,phi,dist,tx,ty,tz 直接指定机位（不写入发布版 UI）
+const qcam = new URLSearchParams(location.search).get('cam');
+if (qcam) {
+  const a = qcam.split(',').map(Number);
+  if (a.length === 6 && a.every(n => Number.isFinite(n))) {
+    orbit.target.set(a[3], a[4], a[5]);
+    orbit.targetT.copy(orbit.target);
+    orbit.theta = orbit.thetaT = a[0];
+    orbit.phi = orbit.phiT = a[1];
+    orbit.dist = orbit.distT = a[2];
+  }
+}
 
 /* ================= 模式 ================= */
 const bO = document.getElementById('mOrbit'), bW = document.getElementById('mWalk');
