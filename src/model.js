@@ -14,7 +14,7 @@ import {
 } from './core.js';
 import {
   info, windowUnit, doorUnit, shutterDoor, canopy, steps, apron,
-  louver, railing, signage, screen, skylight, downpipe, mechBox,
+  louver, railing, signage, screen, skylight, bipvRoof, downpipe, mechBox,
 } from './detail.js';
 
 /* ================= 参数表 ================= */
@@ -73,7 +73,7 @@ export const P = {
     gsVent: { u: [-12.45, -10.95], y: [1.90, 2.70] },
   },
 
-  pv: { rows: 3, cols: 8, w: 1.65, d: 1.00, gap: 0.14, tilt: 10 },
+  pv: { rows: 3, cols: 8, w: 1.65, d: 1.00, gap: 0.09, tilt: 10 },
   screen: { u: [-8.40, -1.20], y: [4.44, 7.10], bar: 0.10, pitch: 0.25 },
   // 东向遮阳：只设在两侧窗上口，中部通高窗不遮挡
   eastShade: { seg: [[-4.90, -2.00], [2.00, 4.90]], out: 0.90, thick: 0.14, y: 6.62 },
@@ -449,65 +449,104 @@ export function buildVilla(scene) {
     simple: '压顶内侧泛水、避雷带未建模',
   });
 
-  // —— 光伏阵列（贴图）——
+  /* ---------- 屋面能源布局：中部 BIPV 采光带 + 两侧满铺光伏 ----------
+     设计逻辑：一层进深 12m，中部必须自然采光，所以不能把光伏铺满；
+     做法不是「天窗避让光伏」，而是把天窗本身做成透光光伏组件（BIPV），
+     屋面成为一套统一的「采光发电屋面」，中部光带兼作采光与发电，
+     南北两侧常规组件满铺到女儿墙内侧。                              */
+  const pv = P.pv;
   const pvMat = new THREE.MeshStandardMaterial({
     map: pvTexture(), roughness: 0.26, metalness: 0.38, color: 0xffffff,
   });
   const PV = new THREE.Group(); PV.name = '屋面光伏阵列'; root.add(PV);
-  const pv = P.pv;
-  const tw = pv.cols * pv.w + (pv.cols - 1) * pv.gap;
-  const td = pv.rows * pv.d + (pv.rows - 1) * pv.gap;
+
+  // 中部 BIPV 采光带（沿东西向通长，位于主楼进深中部）
+  const bandD = 2.40;                                  // 光带宽度
+  const bandZ = (m.z0 + m.z1) / 2;                     // 进深正中
+  const bandW = (m.x1 - m.x0) - 2 * 1.10;              // 两端各留 1.10m 检修边
+  const band = bipvRoof({
+    x: 0, z: bandZ, w: bandW, d: bandD, y: m.f2 + 0.30,
+    root: RF, name: '屋面 BIPV 采光带',
+  });
+  reg(band);
+
+  /* 常规光伏布点：以「块」为单位排布，块内整排整列，块间不重叠。
+     屋面分三个功能区，互不侵占：
+       ① 南块（光带以南 → 南女儿墙内侧）
+       ② 北块-东（光带以北、设备区以东）
+       ③ 北块-西：让位给热泵机组与检修走道，不铺光伏
+     每块宽度取整列数，从块中心对称排布，避免出现残列。          */
+  const tw = pv.cols * pv.w + (pv.cols - 1) * pv.gap;   // 8 列总宽
+  const td = pv.rows * pv.d + (pv.rows - 1) * pv.gap;   // 3 排总深
+  const edgeIn = 0.42;                                  // 距女儿墙内侧净距
+
+  // 设备区（西北角）：x ∈ [-8.0, -2.6]，z ∈ [-5.7, -3.4]
+  const eqZone = { x0: -8.0, x1: -2.6, z0: m.z0 + edgeIn, z1: -3.30 };
+
   const pvList = [], legList = [];
-  for (let r = 0; r < pv.rows; r++) {
-    for (let c = 0; c < pv.cols; c++) {
-      const x = -tw / 2 + pv.w / 2 + c * (pv.w + pv.gap);
-      const z = m.z1 - 1.60 - td + pv.d / 2 + r * (pv.d + pv.gap);
-      pvList.push({ x, y: m.f2 + 0.40, z, rx: -pv.tilt * Math.PI / 180 });
-      legList.push({ x: x - pv.w * 0.32, y: m.f2 + 0.40, z });
-      legList.push({ x: x + pv.w * 0.32, y: m.f2 + 0.40, z });
+  /** 在给定矩形内，按 cols×rows 铺一个整块（超出则收缩列数保证不越界） */
+  const fillBlock = (bx0, bx1, bz0, bz1, cols) => {
+    const bw = bx1 - bx0;
+    const n = Math.max(1, Math.min(cols, Math.floor((bw + pv.gap) / (pv.w + pv.gap))));
+    const wTot = n * pv.w + (n - 1) * pv.gap;
+    const dTot = td;
+    const cx0 = bx0 + (bw - wTot) / 2;
+    const cz0 = bz0 + ((bz1 - bz0) - dTot) / 2;
+    for (let r = 0; r < pv.rows; r++) {
+      for (let c = 0; c < n; c++) {
+        const x = cx0 + pv.w / 2 + c * (pv.w + pv.gap);
+        const z = cz0 + pv.d / 2 + r * (pv.d + pv.gap);
+        pvList.push({ x, y: m.f2 + 0.40, z, rx: -pv.tilt * Math.PI / 180 });
+        legList.push({ x: x - pv.w * 0.32, y: m.f2 + 0.40, z });
+        legList.push({ x: x + pv.w * 0.32, y: m.f2 + 0.40, z });
+      }
     }
-  }
+  };
+
+  const zBandN = bandZ - bandD / 2 - 0.30;              // 光带北边缘
+  const zBandS = bandZ + bandD / 2 + 0.30;              // 光带南边缘
+  // ① 南块：整宽 8 列
+  fillBlock(m.x0 + edgeIn, m.x1 - edgeIn, zBandS, m.z1 - edgeIn, pv.cols);
+  // ② 北块-东：设备区以东至东女儿墙内侧
+  fillBlock(eqZone.x1 + 0.30, m.x1 - edgeIn, m.z0 + edgeIn, zBandN, pv.cols);
+  // ③ 北块-西（x -8.6…-8.0）：仅 0.6m，不足一列，不铺光伏，留作检修通道
   instanced(new THREE.BoxGeometry(pv.w, 0.05, pv.d), pvMat, pvList, PV, '光伏板');
   instanced(new THREE.BoxGeometry(0.05, 0.22, 0.05), M.metal, legList, PV, '光伏支架');
+
+  const nPV = pvList.length;
+  const roofArea = (m.x1 - m.x0) * (m.z1 - m.z0);
+  const areaPV = nPV * pv.w * pv.d, areaBIPV = bandW * bandD;
   info(PV, '屋面光伏阵列', {
-    size: `${pv.rows}×${pv.cols} = ${pv.rows * pv.cols} 块，单块 ${pv.w}×${pv.d}m`,
-    mat: '单晶硅组件（贴图）+ 铝合金支架',
-    note: `倾角 ${pv.tilt}°，占地约 ${(tw * td).toFixed(1)} m²，占屋面约 ${(tw * td / (18 * 12) * 100).toFixed(0)}%`,
+    size: `${nPV} 块常规组件（南北两组各 ${pv.rows}×${pv.cols}）＋ 中部 BIPV 采光带 ${bandW.toFixed(1)}×${bandD.toFixed(1)}m`,
+    mat: '单晶硅组件 + BIPV 透光组件 + 铝合金支架',
+    note: `倾角 ${pv.tilt}°；发电面积 ${(areaPV + areaBIPV).toFixed(1)} m²，占屋面约 ${((areaPV + areaBIPV) / roofArea * 100).toFixed(0)}%`,
     simple: '简化：未建模逆变器、桥架、电缆与检修通道',
   });
   reg(PV);
 
-  // —— 采光天窗（一层进深 12m，中部补光）——
-  // 光伏阵列占 z ∈ [m.z1-1.60-td, m.z1-1.60]，天窗必须落在其北侧空区（z 更小），
-  // 否则会与光伏板在平面上重叠
-  const pvZmin = m.z1 - 1.60 - td;
-  const skyZ = pvZmin - 1.90;
-  [[-4.60, 0], [4.60, 0], [0, 0]].forEach(([dx], i) => reg(skylight({
-    x: dx, z: skyZ, w: 3.20, d: 1.40, y: m.f2 + 0.30, root: RF, name: `屋面采光天窗-${i + 1}`,
-  })));
-
   // —— 屋面设备平台 ——
   const EQ = new THREE.Group(); EQ.name = '屋面设备'; root.add(EQ);
+  // 两台机组集中在西北角（eqZone 内），东侧屋面完整留给光伏
   reg(mechBox({
-    x: -5.6, y: m.f2 + 0.30, z: -4.2, w: 1.60, h: 1.00, d: 0.90,
+    x: -6.60, y: m.f2 + 0.32, z: -4.55, w: 1.60, h: 1.00, d: 0.90,
     root: EQ, name: '屋面热泵机组-A', kind: '空气源热泵室外机',
   }));
   reg(mechBox({
-    x: -3.4, y: m.f2 + 0.30, z: -4.2, w: 1.20, h: 0.80, d: 0.80,
+    x: -4.60, y: m.f2 + 0.32, z: -4.55, w: 1.20, h: 0.80, d: 0.80,
     root: EQ, name: '屋面热泵机组-B', kind: '空气源热泵室外机',
   }));
   // 设备基础（整体抬高，与光伏分区隔离）
-  const eqBase = box(5.40, 0.16, 2.10, M.conc, -4.6, m.f2 + 0.38, -4.2, EQ, { bevel: 0.008 });
+  const eqBase = box(4.90, 0.16, 1.70, M.conc, -5.85, m.f2 + 0.40, -4.55, EQ, { bevel: 0.008 });
   eqBase.name = '屋面设备基础';
   info(eqBase, '屋面设备基础', {
-    size: '5.40 × 2.10 × 0.16 m',
+    size: '4.90 × 1.70 × 0.16 m',
     mat: '混凝土条形基础',
-    note: '机组落在基础上，与光伏阵列分区隔离，留出检修通道',
+    note: '两台热泵落在同一基础上，集中在西北角，东侧屋面完整用于光伏',
     simple: '简化：未建模减振垫与预埋件',
   });
   reg(eqBase);
-  // 设备与光伏分区之间的检修走道
-  box(18.0 - 0.44, 0.06, 1.10, M.concDark, 0, m.f2 + 0.33, -5.4, EQ, { cast: false }).name = '屋面检修走道';
+  // 检修走道：设备区与光伏之间留 1.10m 通道（沿东西向）
+  box(4.90, 0.06, 1.10, M.concDark, -5.85, m.f2 + 0.33, -3.20, EQ, { cast: false }).name = '屋面检修走道';
 
   /* =========================================================
      简化五金（标注）
