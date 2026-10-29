@@ -19,7 +19,7 @@ import {
 
 /* ================= 参数表 ================= */
 export const P = {
-  site: { w: 60, d: 48 },
+  site: { w: 39, d: 28, cx: -2.4, cz: 0 },
 
   main: {
     x0: -9.0, x1: 9.0,     // 面宽 18.0
@@ -54,12 +54,13 @@ export const P = {
             { u: [2.70, 4.20],   y: [4.40, 6.40] },
             { u: [-0.70, 0.70],  y: [4.40, 7.00] }], // 中部通高
     // —— 北立面主楼段（u = -世界 x）——
-    nDoor:  { u: [-4.10, -2.90], y: [0.00, 2.20] },  // 服务门 1.2m（已加宽）
-    nWin1: [{ u: [-5.40, -3.90], y: [1.50, 2.70] },
-            { u: [-2.70, -1.20], y: [1.50, 2.70] },
-            { u: [0.00, 1.50],   y: [1.50, 2.70] }],
-    nWin2: [{ u: [-5.40, -3.90], y: [4.40, 6.20] },
-            { u: [0.00, 1.50],   y: [4.40, 6.20] }],
+    nDoor:  { u: [-4.10, -2.90], y: [0.00, 2.20] },  // 服务门 1.2m
+    // 高窗必须避开门洞：左窗收到 -5.60~-4.30（与门留 0.20m 窗间墙）
+    nWin1: [{ u: [-5.60, -4.30], y: [1.50, 2.70] },
+            { u: [-2.50, -1.00], y: [1.50, 2.70] },
+            { u: [0.60, 2.10],   y: [1.50, 2.70] }],
+    nWin2: [{ u: [-5.60, -4.30], y: [4.40, 6.20] },
+            { u: [0.60, 2.10],   y: [4.40, 6.20] }],
     // —— 北立面车库段（u = -世界 x，世界 x ∈ [-14.4,-9] → u ∈ [9,14.4]）——
     gWin:  [{ u: [10.60, 12.10], y: [1.30, 2.30] }],
     // —— 西立面主楼段（u = 世界 z）——
@@ -91,25 +92,34 @@ export function buildVilla(scene) {
   const reg = (g) => { if (g && g.userData.info) parts.push(g.userData.info); return g; };
 
   /* ---------- 地坪 ---------- */
-  const ground = box(P.site.w, 0.30, P.site.d, M.conc, 0, -0.15, 0, root);
+  const ground = box(P.site.w, 0.30, P.site.d, M.pave, P.site.cx, -0.15, P.site.cz, root);
   ground.name = '场地地坪';
   ground.castShadow = false;
 
   /* ---------- 场地铺装（让建筑落地，仅铺装不做绿化/车辆） ---------- */
   const SP = new THREE.Group(); SP.name = '场地铺装'; root.add(SP);
-  // 建筑周边一圈铺装
-  const ring = box(P.main.x1 - gr.x0 + 2.6, 0.06, (m.z1 + P.cant.south) - m.z0 + 2.6, M.concDark,
-    (gr.x0 + m.x1) / 2, 0.03, (m.z0 + m.z1 + P.cant.south) / 2, SP, { cast: false });
-  ring.name = '周边铺装';
-  // 车库车道（卷帘门朝西，车道向西引出）
-  const drive = box(11.0, 0.07, 5.60, M.dark, gr.x0 - 5.5, 0.035, -2.6, SP, { cast: false });
+
+  // 铺装直接做在场地底板上：0.9m 石材分格缝（真几何细条，非贴图）
+  // 用 InstancedMesh 批绘制：74 条缝若各自成 Mesh 会多出 74 次 DrawCall
+  const jmG = new THREE.Group(); jmG.name = '铺装分格缝'; SP.add(jmG);
+  const sx0 = P.site.cx - P.site.w / 2 + 0.45, sx1 = P.site.cx + P.site.w / 2 - 0.45;
+  const sz0 = P.site.cz - P.site.d / 2 + 0.45, sz1 = P.site.cz + P.site.d / 2 - 0.45;
+  const jxList = [], jzList = [];
+  for (let x = sx0; x <= sx1 + 1e-6; x += 0.9) jxList.push({ x, y: 0.002, z: (sz0 + sz1) / 2 });
+  for (let z = sz0; z <= sz1 + 1e-6; z += 0.9) jzList.push({ x: (sx0 + sx1) / 2, y: 0.002, z });
+  instanced(new THREE.BoxGeometry(0.018, 0.004, sz1 - sz0), M.joint, jxList, jmG, '分格缝-纵');
+  instanced(new THREE.BoxGeometry(sx1 - sx0, 0.004, 0.018), M.joint, jzList, jmG, '分格缝-横');
+
+  // 车库车道（卷帘门朝西）：深灰沥青，收在场地内
+  const drive = box(4.60, 0.05, 5.40, M.asphalt, gr.x0 - 2.30, 0.025, -2.9, SP, { cast: false });
   drive.name = '车库车道（简化：无路面标线与坡度）';
   // 入口步道（主入口向南引出）
-  const walk = box(3.40, 0.07, 7.0, M.concDark, 0, 0.035, m.z1 + P.cant.south + 3.0, SP, { cast: false });
+  const walk = box(3.40, 0.05, 6.4, M.paveWalk, 0, 0.025, m.z1 + P.cant.south + 2.7, SP, { cast: false });
   walk.name = '入口步道';
+
   info(SP, '场地铺装', {
-    size: `周边通铺 1.3m 宽 · 车道 11.0×5.6m · 入口步道 3.4×7.0m`,
-    mat: '浅灰铺装 + 沥青车道',
+    size: `${P.site.w.toFixed(1)}×${P.site.d.toFixed(1)}m 石材铺装（0.9m 分格缝）· 车道 4.6×5.4m · 入口步道 3.4×6.4m`,
+    mat: '浅灰石材铺装 + 深灰沥青车道',
     note: '仅做铺装；按你要求不含绿化、树木、车辆等环境要素',
     simple: '简化：无路面标线、无排水坡度、无路缘石细节',
   });
@@ -309,11 +319,13 @@ export function buildVilla(scene) {
     box(len + 0.06, 0.035, 0.035, M.metal, 0, -es.thick / 2 - 0.02, es.out + 0.03, g).name = '遮阳滴水';
     // 侧封板
     [-1, 1].forEach((s) => box(0.06, es.thick, es.out, M.metal, s * (len / 2 + 0.02), 0, es.out / 2, g).name = '遮阳侧封板');
-    // 拉杆（简化：两根斜杆，从板外端斜拉回墙面下方）
+    // 拉杆：从板外端上表面斜拉回墙面下方（两端必须正好落在板端与墙面上）
     [-1, 1].forEach((s, k) => {
-      const L = Math.hypot(es.out, 0.90);
-      const r = box(0.045, L, 0.045, M.steel, s * (len / 2 - 0.25), -0.45, es.out / 2, g);
-      r.rotation.x = Math.atan2(es.out, 0.90);
+      const drop = 0.90;                       // 墙面锚点距板面的垂直距离
+      const L = Math.hypot(es.out, drop);
+      const r = box(0.045, L, 0.045, M.steel, s * (len / 2 - 0.25), -drop / 2, es.out / 2, g);
+      // 杆轴由 (y=-drop, z=0) 指向 (y=0, z=out)：即板外端斜拉回墙面
+      r.rotation.x = Math.atan2(es.out, drop) + Math.PI;
       r.name = `遮阳拉杆-${si + 1}-${k + 1}（简化）`;
     });
     D.e1.put(g, ES, (a + b) / 2, es.y, 0);
@@ -466,8 +478,12 @@ export function buildVilla(scene) {
   reg(PV);
 
   // —— 采光天窗（一层进深 12m，中部补光）——
-  [[-3.6, 1.0], [3.6, 1.0], [0, -2.4]].forEach(([x, z], i) => reg(skylight({
-    x, z, w: 2.60, d: 1.30, y: m.f2 + 0.30, root: RF, name: `屋面采光天窗-${i + 1}`,
+  // 光伏阵列占 z ∈ [m.z1-1.60-td, m.z1-1.60]，天窗必须落在其北侧空区（z 更小），
+  // 否则会与光伏板在平面上重叠
+  const pvZmin = m.z1 - 1.60 - td;
+  const skyZ = pvZmin - 1.90;
+  [[-4.60, 0], [4.60, 0], [0, 0]].forEach(([dx], i) => reg(skylight({
+    x: dx, z: skyZ, w: 3.20, d: 1.40, y: m.f2 + 0.30, root: RF, name: `屋面采光天窗-${i + 1}`,
   })));
 
   // —— 屋面设备平台 ——
@@ -502,16 +518,17 @@ export function buildVilla(scene) {
   reg(downpipe({ x: m.x1 - 0.12, z: m.z0 + 0.12, y0: 0, y1: m.f2, root: HW, name: '雨水立管-2（东北背面）' }));
   // 空调室外机（北立面，带百叶罩）
   reg(mechBox({
-    x: 6.2, y: 0.30, z: m.z0 - 0.55, w: 1.10, h: 0.85, d: 0.55,
+    x: 6.10, y: 0.14, z: m.z0 - 0.55, w: 1.10, h: 0.85, d: 0.55,
     root: HW, name: '空调室外机-1', kind: '分体空调室外机',
   }));
   reg(mechBox({
-    x: 4.6, y: 0.30, z: m.z0 - 0.55, w: 1.10, h: 0.85, d: 0.55,
+    x: 4.70, y: 0.14, z: m.z0 - 0.55, w: 1.10, h: 0.85, d: 0.55,
     root: HW, name: '空调室外机-2', kind: '分体空调室外机',
   }));
+  // 百叶罩：外机最外缘 z=-6.825，罩移到 -6.95..-6.85，与外机留 25mm 净距（原值会穿插）
   reg(louver({
-    x: 5.4, y: 0.95, z: m.z0 - 0.78, w: 3.20, h: 1.00, d: 0.26,
-    ry: 0, root: HW, name: '空调外机百叶罩', blades: 12,
+    x: 5.40, y: 0.565, z: m.z0 - 0.90, w: 3.30, h: 1.15, d: 0.10,
+    ry: 0, root: HW, name: '空调外机百叶罩', blades: 13,
   }));
   // 入口壁灯
   [[-1.9], [1.9]].forEach(([x], i) => {
@@ -604,4 +621,39 @@ export function buildVilla(scene) {
   }));
 
   return { root, parts };
+}
+
+
+/* ============================================================
+   自检：同一立面上洞口是否重叠（重叠会让墙板 Shape 挖洞自相交，
+   挤出后出现斜切多边形等破面）
+============================================================ */
+export function checkOpenings() {
+  const bad = [];
+  const facades = [
+    ['南一层', P.open.sDoor, P.open.sWinL, P.open.sWinR].filter(Boolean),
+    ['南二层', P.open.sWin2].filter(Boolean),
+    ['东一层', ...P.open.eWin1],
+    ['东二层', ...P.open.eWin2],
+    ['北一层', P.open.nDoor, ...P.open.nWin1],
+    ['北二层', ...P.open.nWin2],
+    ['北车库', ...P.open.gWin],
+    ['西一层', ...P.open.wWin1],
+    ['西二层', P.open.wDoor2, ...P.open.wWin2],
+    ['西车库', P.open.gShutter],
+    ['车库南', P.open.gsVent],
+  ];
+  facades.forEach(([nm, ...list]) => {
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const A = list[i], B = list[j];
+        const ox = Math.min(A.u[1], B.u[1]) - Math.max(A.u[0], B.u[0]);
+        const oy = Math.min(A.y[1], B.y[1]) - Math.max(A.y[0], B.y[0]);
+        if (ox > 1e-6 && oy > 1e-6) {
+          bad.push(`${nm}: 洞口${i + 1}与洞口${j + 1} 重叠 ${ox.toFixed(2)}m×${oy.toFixed(2)}m`);
+        }
+      }
+    }
+  });
+  return bad;
 }
