@@ -7,38 +7,53 @@
   html,body { margin:0; background:#fff; font-family:"Microsoft YaHei","PingFang SC",sans-serif; }
   .wrap { width:1560px; margin:0 auto; padding:18px 18px 30px; }
   h1 { font-size:22px; margin:0 0 4px; }
-  .sub { font-size:13px; color:#66707d; margin:0 0 16px; }
+  .sub { font-size:13px; color:#66707d; margin:0 0 16px; line-height:1.7; }
   h2 { font-size:15px; margin:22px 0 8px; padding-left:8px; border-left:4px solid #1f7a5a; }
   .g2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   .g3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
   figure { margin:0; }
   img { width:100%; display:block; border:1px solid #d5dbe3; }
   figcaption { font-size:12.5px; color:#39424e; padding:5px 2px; font-weight:600; }
+  .note { font-size:12.5px; color:#4d5765; line-height:1.9; margin-top:8px; }
+  .note b { color:#1d2530; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>豪华别墅 · 外立面数字孪生　交付图版</h1>
-  <p class="sub">主楼 18.0m ＋ 西车库 5.4m ＝ 总宽 23.4m　·　一层 3.90m / 二层楼面 4.32m / 女儿墙顶 8.10m　·　洞口为真实几何，板缝为真实留空</p>
+  <p class="sub">
+    主楼 18.0m ＋ 西车库 5.4m ＝ 总宽 23.4m　·　一层 3.90m / 二层楼面 4.32m / 女儿墙顶 8.10m<br>
+    洞口为真实几何（墙厚 300mm、洞边 14mm 倒角）　·　板缝为真实留空　·　纯色 PBR，仅光伏与门牌用贴图
+  </p>
 
-  <h2>四立面 ＋ 屋顶 ＋ 体量透视（正交投影，绿色＝已处置，橙色＝待确认）</h2>
+  <h2>四立面 ＋ 屋顶 ＋ 体量透视（正交投影）</h2>
   <div class="g3">
     <figure><img src="south.png"><figcaption>南立面（主景观面 / 主入口）</figcaption></figure>
-    <figure><img src="east.png"><figcaption>东立面</figcaption></figure>
-    <figure><img src="west.png"><figcaption>西立面（车库面）</figcaption></figure>
+    <figure><img src="east.png"><figcaption>东立面（水平遮阳板）</figcaption></figure>
+    <figure><img src="west.png"><figcaption>西立面（车库面 / 露台）</figcaption></figure>
     <figure><img src="north.png"><figcaption>北立面（背面 / 服务入口）</figcaption></figure>
-    <figure><img src="roof.png"><figcaption>屋顶平面</figcaption></figure>
-    <figure><img src="persp.png"><figcaption>体量透视</figcaption></figure>
+    <figure><img src="roof.png"><figcaption>屋顶平面（光伏 24 块 / 天窗 3 组 / 机组 2 台）</figcaption></figure>
+    <figure><img src="persp.png"><figcaption>西南体量透视</figcaption></figure>
   </div>
 
   <h2>局部精修样板：主入口门廊 ＋ 南立面一个开间（左＝体量版　右＝精修版）</h2>
-  <figure><img src="sample.png"><figcaption>上行标准视距 7m　下行近景（窗台滴水与雨棚端部）</figcaption></figure>
+  <figure><img src="sample.png"><figcaption>上行标准视距　下行近景（窗台滴水与雨棚端部）</figcaption></figure>
+  <p class="note">
+    体量版只有洞口与体块；精修版补齐窗框、洞口内衬、窗台板与滴水、板缝、门楣、雨棚吊顶与柱脚。
+  </p>
 
   <h2>网页端成果（环绕 / 漫游 / 构件拾取）</h2>
   <div class="g2">
-    <figure><img src="web0.png"><figcaption>全景视点</figcaption></figure>
-    <figure><img src="web1.png"><figcaption>预设视点：主入口雨棚（近距）</figcaption></figure>
+    <figure><img src="web0.png"><figcaption>全景视点（环绕模式）</figcaption></figure>
+    <figure><img src="web1.png"><figcaption>主入口雨棚（近距漫游）</figcaption></figure>
+    <figure><img src="web2.png"><figcaption>南立面落地窗近景</figcaption></figure>
+    <figure><img src="web3.png"><figcaption>二层木格栅近景</figcaption></figure>
   </div>
+
+  <p class="note">
+    <b>轻量化：</b>DrawCall ≈ 474　·　三角面 19k　·　可拾取构件 58 项　·　贴图 2 张　·　静态阴影单次烘焙<br>
+    <b>交互：</b>左键拖拽旋转 / 滚轮缩放 / 右键或 Shift 平移　｜　漫游模式 WASD 行走 + 准星点击　｜　悬停高亮、点击弹出构件信息卡（尺寸 / 材质 / 做法 / 简化说明）
+  </p>
 </div>
 </body>
 </html>
