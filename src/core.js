@@ -26,7 +26,7 @@ export const M = {
   coatShade: std(0xdfdbd1, { r: 0.82 }),    // 涂料阴影面
 
   metal: std(0x373c44, { r: 0.34, m: 0.72 }),      // 深灰铝板（框/压顶/包边）
-  metalLite: std(0xa4abb5, { r: 0.32, m: 0.62 }),  // 浅灰铝（雨棚底/格栅封边）
+  metalLite: std(0x99a0aa, { r: 0.44, m: 0.42, extra: { envMapIntensity: 0.55 } }),  // 浅灰铝（雨棚底/格栅封边）
   steel: std(0x6e757f, { r: 0.40, m: 0.55 }),      // 不锈钢（栏杆/立柱）
 
   wood: std(0x8d6c46, { r: 0.68 }),         // 木饰面（格栅）
@@ -42,9 +42,16 @@ export const M = {
   }),
 
   dark: std(0x353b44, { r: 0.60 }),         // 内胆（洞口里看到的室内，不用纯黑）
-  conc: std(0xc3bfb7, { r: 0.88 }),         // 混凝土（地坪/台阶/女儿墙内侧）
-  concDark: std(0xa8a49c, { r: 0.90 }),     // 台阶踢面 / 散水
+  conc: std(0xa8a49a, { r: 0.88 }),         // 混凝土（地坪/台阶/女儿墙内侧）
+  concDark: std(0x9a968c, { r: 0.90 }),     // 台阶踢面 / 散水 / 铺装
   gravel: std(0x8e8a81, { r: 0.94 }),       // 散水卵石
+  // 场地铺装：暖灰石材。envMapIntensity 压低到 0.16，
+  // 否则粗糙度再高的地坪也会反射蓝天，整片地面看起来像积水的深色板
+  pave: new THREE.MeshLambertMaterial({ color: 0xd8d2c4 }),
+  // 入口步道：比铺装再亮一档，形成通行引导
+  paveWalk: new THREE.MeshLambertMaterial({ color: 0xded8ca }),
+  // 车库车道：中性深灰沥青（刻意偏中性，不用偏蓝的 M.dark）
+  asphalt: new THREE.MeshLambertMaterial({ color: 0x8a877f }),
 };
 
 /* ---------------- 程序化天空（PBR 环境光） ----------------
@@ -339,13 +346,13 @@ export function setupLights(scene, opts = {}) {
   const cam = sun.shadow.camera;
   cam.left = -s; cam.right = s; cam.top = s; cam.bottom = -s;
   cam.near = 1; cam.far = 120;
-  sun.shadow.bias = -0.0006;
-  sun.shadow.normalBias = 0.035;
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.018;
   sun.target.position.set(0, 3, 0);
   scene.add(sun); scene.add(sun.target);
 
   // 天空补光（冷）+ 地面反弹（暖）
-  const hemi = new THREE.HemisphereLight(0xbcd8f0, 0x6c6a5e, opts.hemiI ?? 0.55);
+  const hemi = new THREE.HemisphereLight(0xc9d4e2, 0x8a8478, opts.hemiI ?? 0.55);
   scene.add(hemi);
 
   // 环境反射
