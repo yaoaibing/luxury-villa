@@ -123,7 +123,8 @@ function buildDetail(scene) {
 const mk = () => {
   const s = new THREE.Scene();
   s.background = new THREE.Color(0xe9edf2);
-  setupLights(s, { background: false, shadowSpan: 14, sunI: 2.3, hemiI: 0.55, envI: 0.85 });
+  // 太阳用与网页端一致的角度（度），样板与成品的光要能对得上
+  setupLights(s, { background: false, shadowSpan: 14, sunI: 2.55, hemiI: 0.56, envI: 0.60, sunAz: 30, sunEl: 40 });
   return s;
 };
 const sMass = mk(), sDet = mk();
