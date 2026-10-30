@@ -123,7 +123,9 @@ document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 // 太阳放在西南上空（对应默认机位 theta≈-0.86 的方向），让可见立面与地面都受光
-setupLights(scene, { background: false, shadowSpan: 22, shadowMap: 4096, sunI: 3.0, hemiI: 0.52, envI: 0.50, sunAz: 205, sunEl: 46 });
+// 太阳：南偏东 30°、仰角 40° —— 初始机位在西南，南立面受光、西立面落影，
+// 投影落到画面前方，360° 环绕时四个面都有明确的明暗关系（角度按「度」传入）。
+setupLights(scene, { background: false, shadowSpan: 22, shadowMap: 4096, sunI: 2.85, hemiI: 0.58, envI: 0.62, sunAz: 30, sunEl: 40 });
 // 背景用柔和冷灰，不用环境贴图（环境贴图当地平线会出现军绿色带）
 scene.background = new THREE.Color(0xe8ecf1);
 
