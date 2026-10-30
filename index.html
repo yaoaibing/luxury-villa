@@ -3,6 +3,20 @@
 <head>
 <meta charset="utf-8">
 <title>豪华别墅 · 外立面数字孪生</title>
+<!-- 手机端：按设备宽度渲染，禁止双指缩放页面（缩放交给 3D 视图本身） -->
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="description" content="用 Three.js 现场搭建的现代豪华别墅外立面数字孪生：可自由环绕、漫游，近距离看门窗雨棚、材质接缝与屋面光伏。">
+<meta name="theme-color" content="#0e141d">
+<!-- 社交分享卡片（微信/QQ/Twitter 抓取） -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="豪华别墅 · 外立面数字孪生">
+<meta property="og:description" content="可环绕、可漫游的现代豪华别墅外立面数字孪生。手机双指缩放，点构件看做法。">
+<meta property="og:url" content="https://yaoaibing.github.io/luxury-villa/">
+<meta property="og:image" content="https://yaoaibing.github.io/luxury-villa/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="豪华别墅 · 外立面数字孪生">
+<meta name="twitter:description" content="可环绕、可漫游的现代豪华别墅外立面数字孪生。">
+<meta name="twitter:image" content="https://yaoaibing.github.io/luxury-villa/og.png">
 <style>
   html, body { margin:0; height:100%; overflow:hidden; background:#0e141d;
     font-family:"Microsoft YaHei","PingFang SC","Helvetica Neue",sans-serif; color:#e8edf4; }
@@ -55053,16 +55067,48 @@ function applyCamera() {
   }
 }
 
-/* ================= 交互 ================= */
+/* ================= 交互 =================
+   单指：旋转（轨道）/ 转头（漫游）
+   双指：捏合缩放 + 双指拖动平移（仅轨道模式；手机上看门窗靠这个）
+   右键/Shift：平移；滚轮：缩放 */
 let drag = null;
 const cv = renderer.domElement;
+const ptrs = new Map();          // 多指追踪：pointerId -> {x,y}
+let pinch = null;                // 双指状态：{dist, mx, my}
 cv.addEventListener('contextmenu', e => e.preventDefault());
+
+const beginDrag = (x, y, btn, shift) => { drag = { x, y, btn, shift, moved: 0 }; };
 
 cv.addEventListener('pointerdown', (e) => {
   cv.setPointerCapture(e.pointerId);
-  drag = { x: e.clientX, y: e.clientY, btn: e.button, shift: e.shiftKey, moved: 0 };
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ptrs.size === 2) {
+    drag = null;                 // 第二根手指按下 → 转入双指手势，取消单指旋转
+    const [a, b] = [...ptrs.values()];
+    pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  } else if (ptrs.size === 1) {
+    beginDrag(e.clientX, e.clientY, e.button, e.shiftKey);
+  }
 });
+
 cv.addEventListener('pointermove', (e) => {
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  // —— 双指：捏合缩放 + 平移（仅轨道模式）——
+  if (ptrs.size >= 2 && pinch && mode === 'orbit') {
+    const [a, b] = [...ptrs.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    orbit.distT = Math.max(2.2, Math.min(120, orbit.distT * (pinch.dist / d)));
+    const k = orbit.dist * 0.0016;
+    const right = new THREE.Vector3(Math.cos(orbit.theta), 0, -Math.sin(orbit.theta));
+    const fwd = new THREE.Vector3(Math.sin(orbit.theta), 0, Math.cos(orbit.theta));
+    orbit.targetT.addScaledVector(right, -(mx - pinch.mx) * k).addScaledVector(fwd, -(my - pinch.my) * k);
+    orbit.targetT.y = Math.max(0.2, Math.min(9, orbit.targetT.y));
+    pinch.dist = d; pinch.mx = mx; pinch.my = my;
+    return;
+  }
+
   if (drag) {
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
     drag.moved += Math.abs(dx) + Math.abs(dy);
@@ -55087,8 +55133,21 @@ cv.addEventListener('pointermove', (e) => {
     hover(e.clientX, e.clientY);
   }
 });
+
 cv.addEventListener('pointerup', (e) => {
+  ptrs.delete(e.pointerId);
+  if (ptrs.size < 2) pinch = null;
   if (drag && drag.moved < 6) pick(e.clientX, e.clientY);
+  drag = null;
+  // 双指抬起一根后，剩下那根继续可以旋转
+  if (ptrs.size === 1) {
+    const p = [...ptrs.values()][0];
+    beginDrag(p.x, p.y, 0, false);
+  }
+});
+cv.addEventListener('pointercancel', (e) => {
+  ptrs.delete(e.pointerId);
+  if (ptrs.size < 2) pinch = null;
   drag = null;
 });
 cv.addEventListener('wheel', (e) => {
