@@ -45,6 +45,9 @@ renderer.toneMappingExposure = 1.02;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.shadowMap.autoUpdate = false;   // 静态场景：只烘一次阴影
+// 调试：?noshadow=1 关掉阴影，用来判断画面里的「线」是几何还是投影
+const NO_SHADOW = q.get('noshadow') === '1';
+if (NO_SHADOW) renderer.shadowMap.enabled = false;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -55,18 +58,47 @@ scene.background = new THREE.Color(0xeef1f5);
    否则背光面的墙与地面全落在阴影里，看不出材质与构造。
 ------------------------------------------------------------------ */
 const SUN_AZ = {
-  south: 168, north: 348, east: 78, west: 258, roof: 128, persp: 128,
+  south: 172, north: 352, east: 80, west: 260, roof: 150, persp: 20,
 }[view] ?? 128;
 // 俯视时屋面直接正对太阳，强度要单独压低，否则一片死白
 const isRoof = view === 'roof';
 setupLights(scene, {
   background: false, shadowSpan: 22, shadowMap: 4096,
-  sunI: isRoof ? 2.05 : 3.0, hemiI: isRoof ? 0.30 : 0.44, envI: isRoof ? 0.34 : 0.48,
-  sunAz: SUN_AZ, sunEl: isRoof ? 64 : 52,
+  sunI: isRoof ? 2.35 : 3.0, hemiI: isRoof ? 0.42 : 0.46, envI: isRoof ? 0.40 : 0.50,
+  sunAz: SUN_AZ, sunEl: isRoof ? 62 : 38,
 });
 
 /* ---------------- 模型 ---------------- */
 const { root: villa } = buildVilla(scene);
+
+// 调试：?hide=组名1,组名2 临时隐藏构件（定位「画面里这条线是谁」）
+const hideList = (q.get('hide') || '').split(',').filter(Boolean);
+hideList.forEach((n) => {
+  const o = villa.getObjectByName(n);
+  if (o) o.visible = false;
+});
+
+/* 图纸视图按面剔除：
+   ① 垂直于本立面的外挂构件（东向遮阳及其拉杆）从南/北看只剩轮廓外一条斜杆，
+      会读成「悬空构件」，故不画；
+   ② 屋顶平面只画屋面本身，场地铺装不参与（否则整片地面把画面填满）。 */
+if (view === 'south' || view === 'north') {
+  villa.traverse((o) => {
+    if (o.userData.docHide && o.userData.docHide.includes(view)) o.visible = false;
+  });
+}
+if (view === 'roof') {
+  // 屋顶平面按「屋面以上」出图：场地、散水沟、台阶、门廊、贴墙五金都在
+  // 剖切线以下，保留会在纸面上留下一圈浮空小块。
+  [
+    '场地地坪', '场地铺装', '简化五金',
+    '散水排水沟(主楼段)', '散水排水沟(车库段)',
+    '主入口门廊', '露台踏步',
+  ].forEach((n) => {
+    const o = villa.getObjectByName(n);
+    if (o) o.visible = false;
+  });
+}
 
 /* ---------------- 相机：正交五视图 ---------------- */
 const m = P.main, gr = P.garage;
@@ -87,7 +119,7 @@ if (view === 'persp') {
   camera.lookAt(-2.6, 3.4, 0.2);
 } else {
   const zm = parseFloat(q.get('zoom') || '1');   // 局部精修核对用：zoom<1 放大
-  const pad = 1.24 * zm;
+  const pad = (view === 'roof' ? 1.10 : 1.24) * zm;
   const fw = view === 'roof' ? need.roof.w * pad : need[view].w * pad;
   const fh = view === 'roof' ? need.roof.d * pad : need[view].h * pad;
   let s = fh;
@@ -111,6 +143,12 @@ if (view === 'persp') {
   const frac = (shiftPx * 2) / hPx;          // 世界单位换算：视口高 s 对应 hPx 像素
   camera.top += (s * frac) / 2;
   camera.bottom += (s * frac) / 2;
+  // 局部核对：?px=&py= 按世界米数平移视口（配合 zoom 定位任意细部）
+  const px = parseFloat(q.get('px') || '0'), py = parseFloat(q.get('py') || '0');
+  if (px || py) {
+    camera.left -= px; camera.right -= px;
+    camera.top -= py; camera.bottom -= py;
+  }
   camera.updateProjectionMatrix();
 }
 
@@ -185,6 +223,29 @@ if (mark && MARKS[view]) {
 renderer.render(scene, camera);
 renderer.shadowMap.needsUpdate = true;
 renderer.render(scene, camera);
+
+/* ---------------- 探针：?probe=屏x,屏y ----------------
+   在指定像素打一条射线，把命中的构件链名写进 title 与 pre#probeOut。
+   用来定位「画面里这条线/这块面到底是谁」，比肉眼猜快得多。 */
+const probe = q.get('probe');
+if (probe) {
+  const [px, py] = probe.split(',').map(Number);
+  const ndc = new THREE.Vector2(px / innerWidth * 2 - 1, -(py / innerHeight) * 2 + 1);
+  const rc = new THREE.Raycaster();
+  rc.setFromCamera(ndc, camera);
+  const hits = rc.intersectObject(villa, true).slice(0, 8).map((h) => {
+    const chain = [];
+    let o = h.object;
+    while (o) { if (o.name) chain.unshift(o.name); o = o.parent; }
+    return `${h.distance.toFixed(2)}m  ${chain.join(' / ') || '(未命名)'}  `
+      + `@${h.point.x.toFixed(2)},${h.point.y.toFixed(2)},${h.point.z.toFixed(2)}`;
+  });
+  const pre = document.createElement('pre');
+  pre.id = 'probeOut';
+  pre.textContent = hits.length ? hits.join('\n') : '无命中';
+  document.body.appendChild(pre);
+  document.title = 'PROBE ' + (hits[0] || 'none');
+}
 window.__ready = true;
 </script>
 </body>
