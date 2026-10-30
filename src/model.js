@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import {
   M, box, slab, instanced, makeDir, facade, wallPanel, pvTexture, signTexture,
+  groundFadeTexture,
 } from './core.js';
 import {
   info, windowUnit, doorUnit, shutterDoor, canopy, steps, apron,
@@ -91,10 +92,23 @@ export function buildVilla(scene) {
   const parts = [];                         // 构件清单（拾取用）
   const reg = (g) => { if (g && g.userData.info) parts.push(g.userData.info); return g; };
 
-  /* ---------- 地坪 ---------- */
-  const ground = box(P.site.w, 0.30, P.site.d, M.pave, P.site.cx, -0.15, P.site.cz, root);
-  ground.name = '场地地坪';
-  ground.castShadow = false;
+  /* ---------- 地面：一块整地，用圆盘而不是方盒顶面 ----------
+     地面必须是单层，不能再叠「铺装板 + 外围地面」（差 2mm 就会 z-fighting）。
+     但方盒顶面由两个三角面拼成，那条对角线在斜视角下会反光成一道深色接缝，
+     横穿整个场地——比 z-fighting 更显眼。改用一个圆盘：
+     三角面呈放射状均匀分布，没有贯穿全场的长边，边缘再用 alpha 淡出。   */
+  const baseMat = new THREE.MeshLambertMaterial({
+    color: 0xded8ca, map: groundFadeTexture(),
+    transparent: true, depthWrite: false,
+  });
+  const discGeo = new THREE.CircleGeometry(56, 96);
+  discGeo.rotateX(-Math.PI / 2);
+  const base = new THREE.Mesh(discGeo, baseMat);
+  base.position.set(P.site.cx, 0, P.site.cz);
+  base.name = '场地地坪';
+  base.renderOrder = -1;
+  base.receiveShadow = true;
+  root.add(base);
 
   /* ---------- 场地铺装（让建筑落地，仅铺装不做绿化/车辆） ---------- */
   const SP = new THREE.Group(); SP.name = '场地铺装'; root.add(SP);
@@ -105,17 +119,29 @@ export function buildVilla(scene) {
   const sx0 = P.site.cx - P.site.w / 2 + 0.45, sx1 = P.site.cx + P.site.w / 2 - 0.45;
   const sz0 = P.site.cz - P.site.d / 2 + 0.45, sz1 = P.site.cz + P.site.d / 2 - 0.45;
   const jxList = [], jzList = [];
-  for (let x = sx0; x <= sx1 + 1e-6; x += 0.9) jxList.push({ x, y: 0.002, z: (sz0 + sz1) / 2 });
-  for (let z = sz0; z <= sz1 + 1e-6; z += 0.9) jzList.push({ x: (sx0 + sx1) / 2, y: 0.002, z });
-  instanced(new THREE.BoxGeometry(0.018, 0.004, sz1 - sz0), M.joint, jxList, jmG, '分格缝-纵');
-  instanced(new THREE.BoxGeometry(sx1 - sx0, 0.004, 0.018), M.joint, jzList, jmG, '分格缝-横');
+  for (let x = sx0; x <= sx1 + 1e-6; x += 0.9) jxList.push({ x, y: 0.0015, z: (sz0 + sz1) / 2 });
+  for (let z = sz0; z <= sz1 + 1e-6; z += 0.9) jzList.push({ x: (sx0 + sx1) / 2, y: 0.0015, z });
+  instanced(new THREE.BoxGeometry(0.032, 0.006, sz1 - sz0), M.joint, jxList, jmG, '分格缝-纵');
+  instanced(new THREE.BoxGeometry(sx1 - sx0, 0.006, 0.032), M.joint, jzList, jmG, '分格缝-横');
 
-  // 车库车道（卷帘门朝西）：深灰沥青，收在场地内
-  const drive = box(4.60, 0.05, 5.40, M.asphalt, gr.x0 - 2.30, 0.025, -2.9, SP, { cast: false });
+  // 车库车道（卷帘门朝西）：深灰沥青，收在场地内。
+  // 车道与步道都做成「零厚度贴面」（PlaneGeometry）而不是 50mm 厚的板：
+  // 5cm 的侧壁在 25m 外被压缩成一条黑线，会横穿整个场地。
+  const driveGeo = new THREE.PlaneGeometry(4.60, 5.40);
+  driveGeo.rotateX(-Math.PI / 2);
+  const drive = new THREE.Mesh(driveGeo, M.asphalt);
+  drive.position.set(gr.x0 - 2.30, 0.004, -2.9);
+  drive.receiveShadow = true;
   drive.name = '车库车道（简化：无路面标线与坡度）';
+  SP.add(drive);
   // 入口步道（主入口向南引出）
-  const walk = box(3.40, 0.05, 6.4, M.paveWalk, 0, 0.025, m.z1 + P.cant.south + 2.7, SP, { cast: false });
+  const walkGeo = new THREE.PlaneGeometry(3.40, 6.4);
+  walkGeo.rotateX(-Math.PI / 2);
+  const walk = new THREE.Mesh(walkGeo, M.paveWalk);
+  walk.position.set(0, 0.004, m.z1 + P.cant.south + 2.7);
+  walk.receiveShadow = true;
   walk.name = '入口步道';
+  SP.add(walk);
 
   info(SP, '场地铺装', {
     size: `${P.site.w.toFixed(1)}×${P.site.d.toFixed(1)}m 石材铺装（0.9m 分格缝）· 车道 4.6×5.4m · 入口步道 3.4×6.4m`,
@@ -309,6 +335,9 @@ export function buildVilla(scene) {
 
   /* ---------- 东向遮阳挑檐（水平，真几何；只盖两侧窗） ---------- */
   const ES = new THREE.Group(); ES.name = '东向遮阳挑檐'; root.add(ES);
+  // 这片挑檐连同拉杆都在东立面上，从南/北看只剩轮廓外一条斜杆，
+  // 图纸视图（views.html）据此把它剔除，避免「悬空斜杆」误读。
+  ES.userData.docHide = ['south', 'north'];
   const es = P.eastShade;
   es.seg.forEach(([a, b], si) => {
     const len = b - a;
