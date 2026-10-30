@@ -52,7 +52,8 @@ export const M = {
   paveWalk: new THREE.MeshLambertMaterial({ color: 0xded8ca }),
   // 车库车道：中性深灰沥青（刻意偏中性，不用偏蓝的 M.dark）
   asphalt: new THREE.MeshLambertMaterial({ color: 0x8a877f }),
-};
+  // 场地外的远景地面：比铺装暗一档，把视线收回建筑，同时给铺装一条边界
+  groundFar: new THREE.MeshLambertMaterial({ color: 0xbfbaae }),};
 
 /* ---------------- 程序化天空（PBR 环境光） ----------------
    等距柱状投影：上半天空 / 下半地面 / 一处太阳亮斑。
@@ -362,8 +363,12 @@ export function facade({
 
 /* ---------------- 灯光：静态 PBR ---------------- */
 export function setupLights(scene, opts = {}) {
-  const sunAz = opts.sunAz ?? 135 * Math.PI / 180;  // 东南
-  const sunEl = opts.sunEl ?? 42 * Math.PI / 180;
+  // 方位角/高度角一律按「度」传入，这里统一换成弧度。
+  // （早期版本直接当弧度用，等价于太阳几乎正顶，各立面只吃到环境光，
+  //   画面很平、投影缩在建筑底下——是这批图「像剪贴画」的根因。）
+  const D2R = Math.PI / 180;
+  const sunAz = (opts.sunAz ?? 135) * D2R;   // 东南
+  const sunEl = (opts.sunEl ?? 42) * D2R;
   const dist = 46;
   const sun = new THREE.DirectionalLight(0xfff4e2, opts.sunI ?? 2.6);
   sun.position.set(
@@ -393,4 +398,26 @@ export function setupLights(scene, opts = {}) {
   if (opts.background !== false) scene.background = sky;
 
   return { sun, hemi, env: sky };
+}
+
+/* ---------------- 远景地面淡出贴图 ----------------
+   场地铺装之外的地面若是一块硬边方形，任何机位都会看到「漂浮的板 +
+   一道地平线」。用径向 alpha 渐变让它向外淡成背景色：中心实、边缘全透，
+   于是地面看上去无限延伸，又不引入植被等被要求舍掉的要素。
+--------------------------------------------------- */
+export function groundFadeTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  // 场地 39×28m 的最远角距中心约 24m；92m 场地的边缘在 46m。
+  // 0.56 → 25.8m 之内完全不透明，铺装范围内不受淡出影响。
+  grd.addColorStop(0.00, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.56, 'rgba(255,255,255,1)');
+  grd.addColorStop(1.00, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 256, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
